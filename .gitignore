@@ -1,0 +1,55 @@
+# Binaries
+/bin/
+/dist/
+/*.exe
+/*.exe~
+/*.dll
+/*.so
+/*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+/vendor/
+/node_modules/
+
+# IDE
+/.idea/
+/.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files with secrets
+configs/config.yaml
+*.local.yaml
+.env
+
+# Logs
+*.log
+/logs/
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Database files
+*.db
+*.sqlite
+
+# WireGuard keys
+*.key
+*.pem
+*.crt
+
+# Go work files
+go.work
+go.work.sum

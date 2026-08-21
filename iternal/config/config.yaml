@@ -1,0 +1,33 @@
+server_address: ":8080"
+log_level: "info"
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  dbname: "vpn_service"
+  sslmode: "disable"
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+jwt:
+  secret: "your-secret-key-change-me"
+  expire_time: 24
+
+vpn:
+  wireguard:
+    interface_name: "wg0"
+    port: 51820
+    private_key: "your-wireguard-private-key"
+    public_key: "your-wireguard-public-key"
+    network_cidr: "10.0.0.1/24"
+  
+  openvpn:
+    config_path: "/etc/openvpn/server.conf"
+    port: 1194
+    network_cidr: "10.8.0.0/24"

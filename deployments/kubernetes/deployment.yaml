@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpn-service
+  namespace: vpn
+  labels:
+    app: vpn-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vpn-service
+  template:
+    metadata:
+      labels:
+        app: vpn-service
+    spec:
+      containers:
+      - name: vpn-service
+        image: vpn-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        - containerPort: 51820
+          protocol: UDP
+        env:
+        - name: DATABASE_HOST
+          value: "postgres-service"
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: vpn-secrets
+              key: jwt-secret
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: wireguard-config
+          mountPath: /etc/wireguard
+        - name: config
+          mountPath: /app/configs
+      volumes:
+      - name: wireguard-config
+        hostPath:
+          path: /etc/wireguard
+      - name: config
+        configMap:
+          name: vpn-config
