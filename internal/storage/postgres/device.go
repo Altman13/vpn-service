@@ -44,3 +44,5 @@ func (db *DB) UpdateDeviceStatus(ctx context.Context, id, status string) error {
 	_, err := db.ExecContext(ctx, query, status, id)
 	return err
 }
+
+

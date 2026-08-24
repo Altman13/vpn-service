@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"main/vpn-service/iternal/config"
 	"net/http"
 	"strings"
+	"vpn-service/internal/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -49,3 +49,5 @@ func Auth(cfg config.JWTConfig) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+

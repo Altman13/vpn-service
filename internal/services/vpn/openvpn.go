@@ -1,37 +1,36 @@
+
 package vpn
 
 import (
-	"context"
-	"fmt"
+    "context"
+    "fmt"
 )
 
 type OpenVPNManager struct {
-	configPath  string
-	port        int
-	networkCIDR string
+    configPath  string
+    port        int
+    networkCIDR string
 }
 
 func NewOpenVPNManager(cfg OpenVPNConfig) *OpenVPNManager {
-	return &OpenVPNManager{
-		configPath:  cfg.ConfigPath,
-		port:        cfg.Port,
-		networkCIDR: cfg.NetworkCIDR,
-	}
+    return &OpenVPNManager{
+        configPath:  cfg.ConfigPath,
+        port:        cfg.Port,
+        networkCIDR: cfg.NetworkCIDR,
+    }
 }
 
 func (m *OpenVPNManager) AddClient(ctx context.Context, deviceID, deviceKey string) error {
-	// TODO: Реализовать добавление клиента в OpenVPN
-	// Обычно это делается через создание файлов конфигурации или через Management Interface
-	return nil
+    // В реальном проекте здесь была бы интеграция с OpenVPN
+    return nil
 }
 
 func (m *OpenVPNManager) RemoveClient(ctx context.Context, deviceID string) error {
-	// TODO: Реализовать удаление клиента
-	return nil
+    return nil
 }
 
 func (m *OpenVPNManager) GetConfig(deviceID, deviceKey string) (string, error) {
-	config := fmt.Sprintf(`client
+    config := fmt.Sprintf(`client
 dev tun
 proto udp
 remote vpn.example.com %d
@@ -62,5 +61,5 @@ YOUR_CLIENT_KEY_HERE
 </key>
 `, m.port)
 
-	return config, nil
+    return config, nil
 }

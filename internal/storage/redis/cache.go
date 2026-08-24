@@ -42,3 +42,5 @@ func (c *Client) Get(ctx context.Context, key string) (string, error) {
 func (c *Client) Delete(ctx context.Context, key string) error {
 	return c.Client.Del(ctx, key).Err()
 }
+
+

@@ -81,3 +81,5 @@ func (h *VPNHandler) GetDevices(c *gin.Context) {
 
 	c.JSON(http.StatusOK, devices)
 }
+
+

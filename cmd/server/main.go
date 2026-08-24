@@ -11,7 +11,7 @@ import (
 
     "vpn-service/internal/api/routes"
     "vpn-service/internal/config"
-    "vpn-service/internal/logger"
+    "vpn-service/pkg/logger"
     "vpn-service/internal/storage/postgres"
     "vpn-service/internal/storage/redis"
 )
@@ -76,3 +76,4 @@ func main() {
 
     log.Info("Server exited properly")
 }
+

@@ -29,3 +29,5 @@ func New(cfg config.DatabaseConfig) (*DB, error) {
 
 	return &DB{db}, nil
 }
+
+

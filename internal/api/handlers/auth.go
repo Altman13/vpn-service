@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"vpn-service/internal/config"
-	"vpn-service/internal/logger"
 	"vpn-service/internal/storage/models"
 	"vpn-service/internal/storage/postgres"
+	"vpn-service/pkg/logger"
 	"vpn-service/pkg/utils"
 
 	"github.com/gin-gonic/gin"
@@ -264,3 +264,5 @@ func (h *AuthHandler) generateTokens(userID, email string) (*TokenResponse, erro
 		TokenType:    "Bearer",
 	}, nil
 }
+
+

@@ -49,3 +49,5 @@ func (db *DB) UpdateUser(ctx context.Context, id, fullName string) error {
 	_, err := db.ExecContext(ctx, query, fullName, id)
 	return err
 }
+
+

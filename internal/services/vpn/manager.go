@@ -12,6 +12,22 @@ import (
 	"vpn-service/pkg/utils"
 )
 
+// WireGuardConfig конфигурация WireGuard
+type WireGuardConfig struct {
+	InterfaceName string
+	Port          int
+	PrivateKey    string
+	PublicKey     string
+	NetworkCIDR   string
+}
+
+// OpenVPNConfig конфигурация OpenVPN
+type OpenVPNConfig struct {
+	ConfigPath  string
+	Port        int
+	NetworkCIDR string
+}
+
 type Manager struct {
 	db          *postgres.DB
 	wgManager   *WireGuardManager
@@ -27,34 +43,37 @@ func NewManager(db *postgres.DB, wgConfig WireGuardConfig, ovpnConfig OpenVPNCon
 }
 
 func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol string) (*models.Device, error) {
-	// Генерация уникального ключа устройства
-	key := generateDeviceKey()
+	deviceKey := generateDeviceKey()
+	ipAddress := generateIPAddress()
 
 	device := &models.Device{
-		ID:        utils.GenerateUUID(),
-		UserID:    userID,
-		Name:      deviceName,
-		Protocol:  protocol,
-		DeviceKey: key,
-		Status:    "active",
-		CreatedAt: time.Now(),
+		ID:         utils.GenerateUUID(),
+		UserID:     userID,
+		Name:       deviceName,
+		Protocol:   protocol,
+		DeviceKey:  deviceKey,
+		IPAddress:  ipAddress,
+		Status:     "active",
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+		LastActive: time.Now(),
 	}
 
-	// Сохранение в БД
 	if err := m.db.CreateDevice(ctx, device); err != nil {
 		return nil, err
 	}
 
-	// Настройка VPN в зависимости от протокола
 	switch protocol {
 	case "wireguard":
 		if err := m.wgManager.AddPeer(ctx, device.ID, device.DeviceKey); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to add wireguard peer: %w", err)
 		}
 	case "openvpn":
 		if err := m.ovpnManager.AddClient(ctx, device.ID, device.DeviceKey); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to add openvpn client: %w", err)
 		}
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 
 	return device, nil
@@ -82,7 +101,6 @@ func (m *Manager) RevokeDevice(ctx context.Context, deviceID string) error {
 		return err
 	}
 
-	// Удаление из VPN
 	switch device.Protocol {
 	case "wireguard":
 		if err := m.wgManager.RemovePeer(ctx, deviceID); err != nil {
@@ -94,7 +112,6 @@ func (m *Manager) RevokeDevice(ctx context.Context, deviceID string) error {
 		}
 	}
 
-	// Обновление статуса в БД
 	return m.db.UpdateDeviceStatus(ctx, deviceID, "revoked")
 }
 
@@ -106,4 +123,8 @@ func generateDeviceKey() string {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
 	return base64.URLEncoding.EncodeToString(bytes)
+}
+
+func generateIPAddress() string {
+	return fmt.Sprintf("10.0.0.%d", time.Now().UnixNano()%254+1)
 }

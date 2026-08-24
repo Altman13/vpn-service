@@ -3,7 +3,7 @@ package middleware
 import (
 	"time"
 
-	"vpn-service/internal/logger"
+	"vpn-service/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,3 +29,5 @@ func Logger(log *logger.Logger) gin.HandlerFunc {
 		)
 	}
 }
+
+
