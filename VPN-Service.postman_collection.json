@@ -1,0 +1,354 @@
+{
+	"info": {
+		"_postman_id": "vpn-service-collection",
+		"name": "VPN Service API",
+		"description": "Полная коллекция API для VPN-сервиса на Go",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"version": "1.0.0"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Проверка статуса сервиса"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"status\": \"ok\",\n    \"service\": \"vpn-service\"\n}",
+							"code": 200
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\",\n    \"full_name\": \"John Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "register"]
+						},
+						"description": "Регистрация нового пользователя"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 86400,\n    \"token_type\": \"Bearer\"\n}",
+							"code": 201
+						},
+						{
+							"name": "Conflict",
+							"body": "{\n    \"error\": \"User already exists\"\n}",
+							"code": 409
+						}
+					]
+				},
+				{
+					"name": "Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "login"]
+						},
+						"description": "Вход в систему и получение JWT токена"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 86400,\n    \"token_type\": \"Bearer\"\n}",
+							"code": 200
+						},
+						{
+							"name": "Unauthorized",
+							"body": "{\n    \"error\": \"Invalid credentials\"\n}",
+							"code": 401
+						}
+					]
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh_token\": \"<your_refresh_token>\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/refresh",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "refresh"]
+						},
+						"description": "Обновление access токена"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 86400,\n    \"token_type\": \"Bearer\"\n}",
+							"code": 200
+						}
+					]
+				},
+				{
+					"name": "Get User Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/user/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "user", "profile"]
+						},
+						"description": "Получение профиля текущего пользователя"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"email\": \"user@example.com\",\n    \"full_name\": \"John Doe\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-08-24T16:28:07.223+03:00\"\n}",
+							"code": 200
+						}
+					]
+				},
+				{
+					"name": "Update User Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"full_name\": \"John Updated Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/user/profile",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "user", "profile"]
+						},
+						"description": "Обновление профиля пользователя"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"message\": \"Profile updated successfully\"\n}",
+							"code": 200
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "VPN Devices",
+			"item": [
+				{
+					"name": "Create VPN Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"device_name\": \"My Laptop\",\n    \"protocol\": \"wireguard\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/vpn/devices",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vpn", "devices"]
+						},
+						"description": "Создание нового VPN устройства"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n    \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"My Laptop\",\n    \"protocol\": \"wireguard\",\n    \"status\": \"active\",\n    \"ip_address\": \"10.0.0.2\",\n    \"created_at\": \"2026-08-24T16:30:00.000Z\"\n}",
+							"code": 201
+						}
+					]
+				},
+				{
+					"name": "Get User Devices",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vpn/devices?user_id={{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vpn", "devices"],
+							"query": [
+								{
+									"key": "user_id",
+									"value": "{{user_id}}",
+									"description": "ID пользователя"
+								}
+							]
+						},
+						"description": "Получение списка всех устройств пользователя"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "[\n    {\n        \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n        \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"name\": \"My Laptop\",\n        \"protocol\": \"wireguard\",\n        \"status\": \"active\",\n        \"ip_address\": \"10.0.0.2\",\n        \"created_at\": \"2026-08-24T16:30:00.000Z\"\n    }\n]",
+							"code": 200
+						}
+					]
+				},
+				{
+					"name": "Get Device Config",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vpn/devices/{{device_id}}/config",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vpn", "devices", "{{device_id}}", "config"]
+						},
+						"description": "Получение конфигурации VPN устройства"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"device_id\": \"660e8400-e29b-41d4-a716-446655440001\",\n    \"config\": \"[Interface]\\nPrivateKey = ...\\nAddress = 10.0.0.2/32\\nDNS = 1.1.1.1\\n\\n[Peer]\\nPublicKey = ...\\nAllowedIPs = 0.0.0.0/0\\nEndpoint = vpn.example.com:51820\"\n}",
+							"code": 200
+						}
+					]
+				},
+				{
+					"name": "Revoke Device",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/v1/vpn/devices/{{device_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "vpn", "devices", "{{device_id}}"]
+						},
+						"description": "Отзыв доступа у VPN устройства"
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"message\": \"Device revoked successfully\"\n}",
+							"code": 200
+						}
+					]
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string",
+			"description": "Базовый URL сервера"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string",
+			"description": "JWT токен доступа"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string",
+			"description": "JWT токен обновления"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string",
+			"description": "ID пользователя"
+		},
+		{
+			"key": "device_id",
+			"value": "",
+			"type": "string",
+			"description": "ID устройства"
+		}
+	]
+}
