@@ -1,4 +1,4 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
@@ -24,7 +24,7 @@ WORKDIR /root/
 
 # Копирование бинарника
 COPY --from=builder /app/vpn-service .
-COPY --from=builder /app/configs ./configs
+# COPY --from=builder /app/configs ./configs
 
 # Открытие портов
 EXPOSE 8080 51820/udp

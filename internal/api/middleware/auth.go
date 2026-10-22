@@ -49,5 +49,3 @@ func Auth(cfg config.JWTConfig) gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-

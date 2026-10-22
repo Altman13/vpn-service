@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   postgres:
@@ -47,7 +46,7 @@ services:
       REDIS_HOST: redis
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key}
     volumes:
-      - ../../configs:/app/configs
+      - ../../configs:/root/configs
       - /var/run/wireguard:/var/run/wireguard
     depends_on:
       postgres:

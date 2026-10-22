@@ -1,76 +1,82 @@
 package config
 
 import (
-    "github.com/spf13/viper"
+	"strings"
+
+	"github.com/spf13/viper"
 )
 
 type Config struct {
-    ServerAddress string `mapstructure:"server_address"`
-    LogLevel      string `mapstructure:"log_level"`
-    Database      DatabaseConfig
-    Redis         RedisConfig
-    JWT           JWTConfig
-    VPN           VPNConfig
+	ServerAddress string         `mapstructure:"server_address"`
+	LogLevel      string         `mapstructure:"log_level"`
+	Database      DatabaseConfig `mapstructure:"database"`
+	Redis         RedisConfig    `mapstructure:"redis"`
+	JWT           JWTConfig      `mapstructure:"jwt"`
+	VPN           VPNConfig      `mapstructure:"vpn"`
 }
 
 type DatabaseConfig struct {
-    Host     string
-    Port     int
-    User     string
-    Password string
-    DBName   string
-    SSLMode  string
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	User     string `mapstructure:"user"`
+	Password string `mapstructure:"password"`
+	DBName   string `mapstructure:"dbname"`
+	SSLMode  string `mapstructure:"sslmode"`
 }
 
 type RedisConfig struct {
-    Host     string
-    Port     int
-    Password string
-    DB       int
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Password string `mapstructure:"password"`
+	DB       int    `mapstructure:"db"`
 }
 
 type JWTConfig struct {
-    Secret     string
-    ExpireTime int // hours
+	Secret     string `mapstructure:"secret"`
+	ExpireTime int    `mapstructure:"expire_time"`
 }
 
 type VPNConfig struct {
-    WireGuard WireGuardConfig
-    OpenVPN   OpenVPNConfig
+	WireGuard WireGuardConfig `mapstructure:"wireguard"`
+	OpenVPN   OpenVPNConfig   `mapstructure:"openvpn"`
 }
 
 type WireGuardConfig struct {
-    InterfaceName string
-    Port          int
-    PrivateKey    string
-    PublicKey     string
-    NetworkCIDR   string
+	InterfaceName string `mapstructure:"interface_name"`
+	Port          int    `mapstructure:"port"`
+	PrivateKey    string `mapstructure:"private_key"`
+	PublicKey     string `mapstructure:"public_key"`
+	NetworkCIDR   string `mapstructure:"network_cidr"`
 }
 
 type OpenVPNConfig struct {
-    ConfigPath string
-    Port       int
-    NetworkCIDR string
+	ConfigPath  string `mapstructure:"config_path"`
+	Port        int    `mapstructure:"port"`
+	NetworkCIDR string `mapstructure:"network_cidr"`
 }
 
 func Load() (*Config, error) {
-    viper.SetConfigName("config")
-    viper.SetConfigType("yaml")
-    viper.AddConfigPath("./configs")
-    viper.AddConfigPath(".")
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("./configs")
+	viper.AddConfigPath(".")
 
-    // Переменные окружения
-    viper.AutomaticEnv()
+	// env: jwt.secret -> JWT_SECRET, database.host -> DATABASE_HOST и т.д.
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
 
-    if err := viper.ReadInConfig(); err != nil {
-        return nil, err
-    }
+	_ = viper.BindEnv("jwt.secret", "JWT_SECRET")
+	_ = viper.BindEnv("database.host", "DATABASE_HOST")
+	_ = viper.BindEnv("redis.host", "REDIS_HOST")
 
-    var config Config
-    if err := viper.Unmarshal(&config); err != nil {
-        return nil, err
-    }
+	if err := viper.ReadInConfig(); err != nil {
+		return nil, err
+	}
 
-    return &config, nil
+	var config Config
+	if err := viper.Unmarshal(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
 }
-
