@@ -2,16 +2,16 @@
 	"info": {
 		"_postman_id": "vpn-service-collection",
 		"name": "VPN Service API",
-		"description": "Полная коллекция API для VPN-сервиса на Go",
+		"description": "Коллекция API VPN-сервиса. Владелец устройства всегда берётся из JWT: user_id в теле или query игнорируется. Токены сохраняются в переменные автоматически после Login и Refresh.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"version": "1.0.0"
+		"version": "2.0.0"
 	},
 	"item": [
 		{
-			"name": "Health Check",
+			"name": "Health",
 			"item": [
 				{
-					"name": "Health Check",
+					"name": "Liveness",
 					"request": {
 						"method": "GET",
 						"header": [],
@@ -20,12 +20,57 @@
 							"host": ["{{base_url}}"],
 							"path": ["health"]
 						},
-						"description": "Проверка статуса сервиса"
+						"description": "Процесс жив. Не зависит от БД и Redis."
 					},
 					"response": [
 						{
 							"name": "Success",
 							"body": "{\n    \"status\": \"ok\",\n    \"service\": \"vpn-service\"\n}",
+							"code": 200
+						}
+					]
+				},
+				{
+					"name": "Readiness",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/readyz",
+							"host": ["{{base_url}}"],
+							"path": ["readyz"]
+						},
+						"description": "Проверяет PostgreSQL и Redis. 503 — если что-то недоступно."
+					},
+					"response": [
+						{
+							"name": "Ready",
+							"body": "{\n    \"status\": \"ready\",\n    \"checks\": {\n        \"database\": \"ok\",\n        \"redis\": \"ok\"\n    }\n}",
+							"code": 200
+						},
+						{
+							"name": "Not ready",
+							"body": "{\n    \"status\": \"not ready\",\n    \"checks\": {\n        \"database\": \"unavailable\",\n        \"redis\": \"ok\"\n    }\n}",
+							"code": 503
+						}
+					]
+				},
+				{
+					"name": "Metrics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/metrics",
+							"host": ["{{base_url}}"],
+							"path": ["metrics"]
+						},
+						"description": "Формат Prometheus (text/plain). В продакшене ограничивать сетью."
+					},
+					"response": [
+						{
+							"name": "Success",
+							"body": "# HELP vpn_http_requests_total Количество HTTP-запросов...\nvpn_http_requests_total{method=\"GET\",route=\"/health\",status=\"200\"} 1",
 							"code": 200
 						}
 					]
@@ -36,14 +81,11 @@
 			"name": "Auth",
 			"item": [
 				{
-					"name": "Register User",
+					"name": "Register",
 					"request": {
 						"method": "POST",
 						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
+							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
 							"mode": "raw",
@@ -54,17 +96,29 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "auth", "register"]
 						},
-						"description": "Регистрация нового пользователя"
+						"description": "Пароль: от 8 до 72 символов. Токены не выдаются — нужен отдельный Login. Занятый email даёт 409."
 					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const data = pm.response.json();",
+									"if (data.id) { pm.collectionVariables.set('user_id', data.id); }"
+								]
+							}
+						}
+					],
 					"response": [
 						{
-							"name": "Success",
-							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 86400,\n    \"token_type\": \"Bearer\"\n}",
+							"name": "Created",
+							"body": "{\n    \"email\": \"user@example.com\",\n    \"full_name\": \"John Doe\",\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"status\": \"active\"\n}",
 							"code": 201
 						},
 						{
 							"name": "Conflict",
-							"body": "{\n    \"error\": \"User already exists\"\n}",
+							"body": "{\n    \"error\": \"email already registered\"\n}",
 							"code": 409
 						}
 					]
@@ -74,10 +128,7 @@
 					"request": {
 						"method": "POST",
 						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
+							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
 							"mode": "raw",
@@ -88,18 +139,36 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "auth", "login"]
 						},
-						"description": "Вход в систему и получение JWT токена"
+						"description": "Выдаёт access + refresh. Заблокированный пользователь получает 403. Есть ограничение частоты (429)."
 					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const data = pm.response.json();",
+									"if (data.access_token) { pm.collectionVariables.set('access_token', data.access_token); }",
+									"if (data.refresh_token) { pm.collectionVariables.set('refresh_token', data.refresh_token); }"
+								]
+							}
+						}
+					],
 					"response": [
 						{
 							"name": "Success",
-							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 86400,\n    \"token_type\": \"Bearer\"\n}",
+							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"SRs2m1...\",\n    \"token_type\": \"Bearer\",\n    \"expires_in\": 3600,\n    \"user\": {\n        \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"email\": \"user@example.com\",\n        \"full_name\": \"John Doe\",\n        \"status\": \"active\",\n        \"created_at\": \"2026-08-24T16:28:07+03:00\"\n    }\n}",
 							"code": 200
 						},
 						{
-							"name": "Unauthorized",
-							"body": "{\n    \"error\": \"Invalid credentials\"\n}",
+							"name": "Invalid credentials",
+							"body": "{\n    \"error\": \"invalid credentials\"\n}",
 							"code": 401
+						},
+						{
+							"name": "Account is not active",
+							"body": "{\n    \"error\": \"account is not active\"\n}",
+							"code": 403
 						}
 					]
 				},
@@ -108,70 +177,101 @@
 					"request": {
 						"method": "POST",
 						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
+							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"refresh_token\": \"<your_refresh_token>\"\n}"
+							"raw": "{\n    \"refresh_token\": \"{{refresh_token}}\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/api/v1/auth/refresh",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "auth", "refresh"]
 						},
-						"description": "Обновление access токена"
+						"description": "Обменивает refresh на новую пару. Старый refresh одноразовый: повторная отправка = 401 и отзыв всей цепочки токенов (признак кражи)."
+					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const data = pm.response.json();",
+									"if (data.access_token) { pm.collectionVariables.set('access_token', data.access_token); }",
+									"if (data.refresh_token) { pm.collectionVariables.set('refresh_token', data.refresh_token); }"
+								]
+							}
+						}
+					],
+					"response": [
+						{
+							"name": "Success",
+							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 3600,\n    \"refresh_token\": \"mkQ7u1...\",\n    \"token_type\": \"Bearer\"\n}",
+							"code": 200
+						},
+						{
+							"name": "Reuse detected",
+							"body": "{\n    \"error\": \"invalid refresh token\"\n}",
+							"code": 401
+						}
+					]
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh_token\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/v1/auth/logout",
+							"host": ["{{base_url}}"],
+							"path": ["api", "v1", "auth", "logout"]
+						},
+						"description": "Отзывает текущий access-токен (jti в блэклисте) и, если передан, refresh. Тело необязательно."
 					},
 					"response": [
 						{
 							"name": "Success",
-							"body": "{\n    \"access_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"refresh_token\": \"eyJhbGciOiJIUzI1NiIs...\",\n    \"expires_in\": 86400,\n    \"token_type\": \"Bearer\"\n}",
+							"body": "{\n    \"message\": \"logged out\"\n}",
 							"code": 200
 						}
 					]
 				},
 				{
-					"name": "Get User Profile",
+					"name": "Get Profile",
 					"request": {
 						"method": "GET",
 						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							}
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" }
 						],
 						"url": {
 							"raw": "{{base_url}}/api/v1/user/profile",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "user", "profile"]
 						},
-						"description": "Получение профиля текущего пользователя"
+						"description": "Профиль текущего пользователя."
 					},
 					"response": [
 						{
 							"name": "Success",
-							"body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"email\": \"user@example.com\",\n    \"full_name\": \"John Doe\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-08-24T16:28:07.223+03:00\"\n}",
+							"body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"email\": \"user@example.com\",\n    \"full_name\": \"John Doe\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-08-24T16:28:07+03:00\"\n}",
 							"code": 200
 						}
 					]
 				},
 				{
-					"name": "Update User Profile",
+					"name": "Update Profile",
 					"request": {
 						"method": "PUT",
 						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							},
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
 							"mode": "raw",
@@ -182,12 +282,12 @@
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "user", "profile"]
 						},
-						"description": "Обновление профиля пользователя"
+						"description": "Меняет только full_name (обязательное, до 255). Email и статус через этот эндпоинт не меняются."
 					},
 					"response": [
 						{
 							"name": "Success",
-							"body": "{\n    \"message\": \"Profile updated successfully\"\n}",
+							"body": "{\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"email\": \"user@example.com\",\n    \"full_name\": \"John Updated Doe\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-08-24T16:28:07+03:00\"\n}",
 							"code": 200
 						}
 					]
@@ -198,68 +298,62 @@
 			"name": "VPN Devices",
 			"item": [
 				{
-					"name": "Create VPN Device",
+					"name": "Create Device",
 					"request": {
 						"method": "POST",
 						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							},
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" },
+							{ "key": "Content-Type", "value": "application/json" }
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"device_name\": \"My Laptop\",\n    \"protocol\": \"wireguard\"\n}"
+							"raw": "{\n    \"device_name\": \"My Laptop\",\n    \"protocol\": \"wireguard\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/api/v1/vpn/devices",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "vpn", "devices"]
 						},
-						"description": "Создание нового VPN устройства"
+						"description": "device_name (до 255) и protocol: wireguard | openvpn. Владелец — из JWT, user_id в теле игнорируется. Адрес выдаётся автоматически. 503 — если протокол не настроен на сервере."
 					},
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"const data = pm.response.json();",
+									"if (data.id) { pm.collectionVariables.set('device_id', data.id); }"
+								]
+							}
+						}
+					],
 					"response": [
 						{
-							"name": "Success",
-							"body": "{\n    \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n    \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"My Laptop\",\n    \"protocol\": \"wireguard\",\n    \"status\": \"active\",\n    \"ip_address\": \"10.0.0.2\",\n    \"created_at\": \"2026-08-24T16:30:00.000Z\"\n}",
+							"name": "Created",
+							"body": "{\n    \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n    \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"name\": \"My Laptop\",\n    \"protocol\": \"wireguard\",\n    \"public_key\": \"xTIBA5rboUvnH4htodjb6e697QxC9sH1VJqoQkR3uQ=\",\n    \"ip_address\": \"10.0.0.2\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-08-24T16:30:00+03:00\"\n}",
 							"code": 201
 						}
 					]
 				},
 				{
-					"name": "Get User Devices",
+					"name": "Get Devices",
 					"request": {
 						"method": "GET",
 						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							}
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" }
 						],
 						"url": {
-							"raw": "{{base_url}}/api/v1/vpn/devices?user_id={{user_id}}",
+							"raw": "{{base_url}}/api/v1/vpn/devices",
 							"host": ["{{base_url}}"],
-							"path": ["api", "v1", "vpn", "devices"],
-							"query": [
-								{
-									"key": "user_id",
-									"value": "{{user_id}}",
-									"description": "ID пользователя"
-								}
-							]
+							"path": ["api", "v1", "vpn", "devices"]
 						},
-						"description": "Получение списка всех устройств пользователя"
+						"description": "Только устройства текущего пользователя. Параметр user_id больше не принимается."
 					},
 					"response": [
 						{
 							"name": "Success",
-							"body": "[\n    {\n        \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n        \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"name\": \"My Laptop\",\n        \"protocol\": \"wireguard\",\n        \"status\": \"active\",\n        \"ip_address\": \"10.0.0.2\",\n        \"created_at\": \"2026-08-24T16:30:00.000Z\"\n    }\n]",
+							"body": "[\n    {\n        \"id\": \"660e8400-e29b-41d4-a716-446655440001\",\n        \"user_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"name\": \"My Laptop\",\n        \"protocol\": \"wireguard\",\n        \"ip_address\": \"10.0.0.2\",\n        \"status\": \"active\"\n    }\n]",
 							"code": 200
 						}
 					]
@@ -269,24 +363,25 @@
 					"request": {
 						"method": "GET",
 						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							}
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" }
 						],
 						"url": {
 							"raw": "{{base_url}}/api/v1/vpn/devices/{{device_id}}/config",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "vpn", "devices", "{{device_id}}", "config"]
 						},
-						"description": "Получение конфигурации VPN устройства"
+						"description": "Конфиг устройства. Чужое устройство неотличимо от несуществующего (404). Для OpenVPN каждый запрос выпускает новый сертификат и гасит предыдущий."
 					},
 					"response": [
 						{
-							"name": "Success",
-							"body": "{\n    \"device_id\": \"660e8400-e29b-41d4-a716-446655440001\",\n    \"config\": \"[Interface]\\nPrivateKey = ...\\nAddress = 10.0.0.2/32\\nDNS = 1.1.1.1\\n\\n[Peer]\\nPublicKey = ...\\nAllowedIPs = 0.0.0.0/0\\nEndpoint = vpn.example.com:51820\"\n}",
+							"name": "WireGuard",
+							"body": "{\n    \"config\": \"[Interface]\\nPrivateKey = yAnz5TF+...\\nAddress = 10.0.0.2/32\\nDNS = 1.1.1.1, 8.8.8.8\\n\\n[Peer]\\nPublicKey = xTIBA5r...\\nAllowedIPs = 0.0.0.0/0\\nEndpoint = vpn.example.com:51820\\nPersistentKeepalive = 25\\n\"\n}",
 							"code": 200
+						},
+						{
+							"name": "Not found",
+							"body": "{\n    \"error\": \"device not found\"\n}",
+							"code": 404
 						}
 					]
 				},
@@ -295,23 +390,19 @@
 					"request": {
 						"method": "DELETE",
 						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{access_token}}",
-								"type": "text"
-							}
+							{ "key": "Authorization", "value": "Bearer {{access_token}}" }
 						],
 						"url": {
 							"raw": "{{base_url}}/api/v1/vpn/devices/{{device_id}}",
 							"host": ["{{base_url}}"],
 							"path": ["api", "v1", "vpn", "devices", "{{device_id}}"]
 						},
-						"description": "Отзыв доступа у VPN устройства"
+						"description": "Снимает пир WireGuard или отзывает сертификат OpenVPN (CRL). Освобождает IP. Повторный вызов идемпотентен."
 					},
 					"response": [
 						{
 							"name": "Success",
-							"body": "{\n    \"message\": \"Device revoked successfully\"\n}",
+							"body": "{\n    \"message\": \"device revoked successfully\"\n}",
 							"code": 200
 						}
 					]
@@ -330,25 +421,25 @@
 			"key": "access_token",
 			"value": "",
 			"type": "string",
-			"description": "JWT токен доступа"
+			"description": "JWT, заполняется автоматически после Login/Refresh"
 		},
 		{
 			"key": "refresh_token",
 			"value": "",
 			"type": "string",
-			"description": "JWT токен обновления"
+			"description": "Одноразовый refresh-токен, заполняется автоматически"
 		},
 		{
 			"key": "user_id",
 			"value": "",
 			"type": "string",
-			"description": "ID пользователя"
+			"description": "ID пользователя из Register"
 		},
 		{
 			"key": "device_id",
 			"value": "",
 			"type": "string",
-			"description": "ID устройства"
+			"description": "ID устройства из Create Device"
 		}
 	]
 }

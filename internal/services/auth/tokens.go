@@ -73,7 +73,7 @@ type Store interface {
 	// MarkRefreshUsed оставляет метку о погашенном токене: по ней повторное
 	// предъявление отличается от неизвестного токена.
 	MarkRefreshUsed(ctx context.Context, hash, family string, ttl time.Duration) error
-	// UsedRefreshFamily возвращает семейство погашенного токена или "".
+	// UsedRefreshFamily возвращает семейство погашенного токена кили "".
 	UsedRefreshFamily(ctx context.Context, hash string) (string, error)
 }
 
