@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [develop, main, master]
+  pull_request:
+
+jobs:
+  unit:
+    name: Сборка, vet и тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Версия берётся из go.mod, чтобы CI и разработка не расходились
+          go-version-file: go.mod
+          cache: true
+
+      - name: Проверка форматирования
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt требуется для:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  integration:
+    name: Интеграционные тесты с PostgreSQL
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vpn_service
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Установка клиента PostgreSQL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      # psql не понимает директивы goose и выполнил бы секцию Down, откатив
+      # миграцию. Поэтому берём только часть до маркера -- +goose Down.
+      - name: Применить миграции
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          for file in scripts/migrations/*.sql; do
+            echo "== $file"
+            sed '/^-- +goose Down/,$d' "$file" \
+              | psql -h localhost -U postgres -d vpn_service -v ON_ERROR_STOP=1 -q
+          done
+
+      - name: Проверить, что миграции идемпотентны
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          for file in scripts/migrations/*.sql; do
+            sed '/^-- +goose Down/,$d' "$file" \
+              | psql -h localhost -U postgres -d vpn_service -v ON_ERROR_STOP=1 -q
+          done
+
+      - name: Интеграционные тесты
+        env:
+          TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/vpn_service?sslmode=disable
+        run: go test -tags integration -count=1 -run Integration -v ./...

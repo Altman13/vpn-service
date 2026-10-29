@@ -15,12 +15,12 @@ type User struct {
 }
 
 type Device struct {
-	ID         string    `json:"id" db:"id"`
-	UserID     string    `json:"user_id" db:"user_id"`
-	Name       string    `json:"name" db:"name"`
-	Protocol   string    `json:"protocol" db:"protocol"` // wireguard, openvpn
-	DeviceKey  string    `json:"-" db:"device_key"`
-	PublicKey  string    `json:"public_key,omitempty" db:"public_key"`
+	ID        string `json:"id" db:"id"`
+	UserID    string `json:"user_id" db:"user_id"`
+	Name      string `json:"name" db:"name"`
+	Protocol  string `json:"protocol" db:"protocol"` // wireguard, openvpn
+	DeviceKey string `json:"-" db:"device_key"`
+	PublicKey string `json:"public_key,omitempty" db:"public_key"`
 	// CertSerial — серийный номер клиентского сертификата OpenVPN.
 	CertSerial string    `json:"cert_serial,omitempty" db:"cert_serial"`
 	IPAddress  string    `json:"ip_address" db:"ip_address"`
@@ -40,5 +40,3 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at" db:"expires_at"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
-
-

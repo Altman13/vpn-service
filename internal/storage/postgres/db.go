@@ -34,5 +34,3 @@ func NewWithDSN(dsn string) (*DB, error) {
 
 	return &DB{db}, nil
 }
-
-
