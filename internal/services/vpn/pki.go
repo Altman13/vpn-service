@@ -27,8 +27,12 @@ const (
 
 	defaultClientCertTTL = 365 * 24 * time.Hour
 	caValidity           = 10 * 365 * 24 * time.Hour
-	crlValidity          = 24 * time.Hour
-	serialBits           = 128
+	// CRL живёт неделю, а обновляется за двое суток до истечения. Если сервис
+	// неделями не отзывает сертификаты, CRL на диске всё равно остаётся
+	// валидной для crl-verify.
+	crlValidity         = 7 * 24 * time.Hour
+	crlRefreshThreshold = 2 * 24 * time.Hour
+	serialBits          = 128
 )
 
 // PKI — собственный удостоверяющий центр сервиса.
@@ -46,6 +50,9 @@ type PKI struct {
 
 	mu      sync.Mutex
 	revoked map[string]time.Time
+
+	// crlNextUpdate — момент, до которого выпущенная CRL считается валидной.
+	crlNextUpdate time.Time
 }
 
 // LoadOrCreatePKI открывает CA из каталога или создаёт новый.
@@ -340,7 +347,30 @@ func (p *PKI) writeCRL() error {
 	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: der}), 0o644); err != nil {
 		return fmt.Errorf("write CRL: %w", err)
 	}
+
+	p.crlNextUpdate = template.NextUpdate
 	return nil
+}
+
+// EnsureFreshCRL пересобирает CRL, если до истечения осталось меньше
+// crlRefreshThreshold. Вызывается при выдаче конфига и отзыве: сервер OpenVPN
+// отвергает клиентов, если его CRL просрочена, а обновлять её по таймеру
+// пришлось бы отдельной горутиной с собственным жизненным циклом.
+func (p *PKI) EnsureFreshCRL() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.clock().Add(crlRefreshThreshold).Before(p.crlNextUpdate) {
+		return nil
+	}
+	return p.writeCRL()
+}
+
+// CRLNextUpdate возвращает срок действия текущей CRL.
+func (p *PKI) CRLNextUpdate() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.crlNextUpdate
 }
 
 // CRLPath возвращает путь к файлу CRL для директивы crl-verify.

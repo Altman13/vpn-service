@@ -103,6 +103,14 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 		return nil, err
 	}
 
+	// Интерфейс проверяется до записи в БД: если поднять его не удалось,
+	// компенсировать нечего и клиент получает внятную ошибку.
+	if protocol == ProtocolWireGuard {
+		if err := m.wgManager.EnsureInterface(ctx); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrWireGuardNotConfigured, err)
+		}
+	}
+
 	now := time.Now()
 	device := &models.Device{
 		ID:         utils.GenerateUUID(),

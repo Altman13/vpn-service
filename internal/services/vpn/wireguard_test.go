@@ -8,13 +8,26 @@ import (
 )
 
 type recordingRunner struct {
-	calls [][]string
-	err   error
+	calls  [][]string
+	err    error
+	failOn map[string]error
 }
 
 func (r *recordingRunner) Run(_ context.Context, name string, args ...string) error {
 	call := append([]string{name}, args...)
 	r.calls = append(r.calls, call)
+
+	// failOn позволяет валить отдельную команду, например "wg set",
+	// оставляя рабочими "wg show".
+	if r.failOn != nil {
+		key := name
+		if len(args) > 0 {
+			key = name + " " + args[0]
+		}
+		if err, ok := r.failOn[key]; ok {
+			return err
+		}
+	}
 	return r.err
 }
 

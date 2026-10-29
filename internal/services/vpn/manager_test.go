@@ -176,7 +176,9 @@ func TestCreateDeviceCompensatesWhenPeerApplyFails(t *testing.T) {
 	store := newMemStore()
 	manager := newTestManager(store)
 	manager.wgManager.enabled = true
-	manager.wgManager.runner = &recordingRunner{err: errors.New("wg: Operation not permitted")}
+	manager.wgManager.runner = &recordingRunner{failOn: map[string]error{
+		"wg set": errors.New("wg: Operation not permitted"),
+	}}
 
 	if _, err := manager.CreateDevice(context.Background(), "user-1", "laptop", ProtocolWireGuard); err == nil {
 		t.Fatal("ожидалась ошибка применения пира")

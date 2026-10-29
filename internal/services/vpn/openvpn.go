@@ -69,6 +69,9 @@ func (m *OpenVPNManager) IssueConfig(ctx context.Context, deviceID string) (stri
 	if err != nil {
 		return "", "", err
 	}
+	if err := pki.EnsureFreshCRL(); err != nil {
+		return "", "", err
+	}
 	if strings.TrimSpace(m.endpoint) == "" {
 		return "", "", fmt.Errorf("%w: endpoint is empty", ErrOpenVPNNotConfigured)
 	}

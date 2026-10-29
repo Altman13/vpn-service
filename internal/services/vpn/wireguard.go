@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // CommandRunner выполняет внешние команды. Вынесен в интерфейс, чтобы
@@ -44,6 +45,9 @@ type WireGuardManager struct {
 	port          int
 	enabled       bool
 	runner        CommandRunner
+
+	mu         sync.Mutex
+	ifaceReady bool
 }
 
 func NewWireGuardManager(cfg WireGuardConfig) *WireGuardManager {
@@ -63,6 +67,36 @@ func NewWireGuardManager(cfg WireGuardConfig) *WireGuardManager {
 		enabled:       cfg.Enabled,
 		runner:        execRunner{},
 	}
+}
+
+// EnsureInterface гарантирует, что интерфейс wg существует.
+//
+// `wg set` работает только с уже поднятым интерфейсом, поэтому при
+// enabled=true сервис сам поднимает его через `wg-quick up`, если wg его не
+// видит. Результат запоминается: повторно команды не выполняются, но ошибка
+// не кэшируется — следующая попытка снова проверит интерфейс.
+func (m *WireGuardManager) EnsureInterface(ctx context.Context) error {
+	if !m.enabled {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ifaceReady {
+		return nil
+	}
+
+	if err := m.runner.Run(ctx, "wg", "show", m.interfaceName); err == nil {
+		m.ifaceReady = true
+		return nil
+	}
+
+	if err := m.runner.Run(ctx, "wg-quick", "up", m.interfaceName); err != nil {
+		return fmt.Errorf("bring up wireguard interface %q: %w", m.interfaceName, err)
+	}
+	m.ifaceReady = true
+	return nil
 }
 
 // AddPeer применяет пира к интерфейсу через wg.
