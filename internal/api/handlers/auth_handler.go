@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -12,17 +13,28 @@ import (
 
 	"vpn-service/internal/api/middleware"
 	"vpn-service/internal/services/auth"
+	"vpn-service/internal/storage/models"
 	"vpn-service/internal/storage/postgres"
 	"vpn-service/pkg/logger"
 )
 
+// UserStore — операции с пользователями, которые нужны хендлерам.
+// Интерфейс вместо *postgres.DB позволяет тестировать регистрацию, вход
+// и профиль без реальной базы, а SQL остаётся в слое хранения.
+type UserStore interface {
+	CreateUser(ctx context.Context, user *models.User) error
+	GetUser(ctx context.Context, id string) (*models.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
+	UpdateUser(ctx context.Context, id, fullName string) error
+}
+
 type AuthHandler struct {
 	tokens *auth.Service
-	db     *postgres.DB
+	db     UserStore
 	log    *logger.Logger
 }
 
-func NewAuthHandler(tokens *auth.Service, db *postgres.DB, log *logger.Logger) *AuthHandler {
+func NewAuthHandler(tokens *auth.Service, db UserStore, log *logger.Logger) *AuthHandler {
 	return &AuthHandler{
 		tokens: tokens,
 		db:     db,
@@ -35,12 +47,16 @@ func NewAuthHandler(tokens *auth.Service, db *postgres.DB, log *logger.Logger) *
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8,max=72"`
-	FullName string `json:"full_name" binding:"required"`
+	FullName string `json:"full_name" binding:"required,max=255"`
 }
 
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
+}
+
+type UpdateProfileRequest struct {
+	FullName string `json:"full_name" binding:"required,max=255"`
 }
 
 // refreshRequest используется и при обмене refresh-токена, и при logout,
@@ -65,28 +81,22 @@ type AuthResponse struct {
 	User         UserDTO `json:"user"`
 }
 
+func userDTO(user *models.User) UserDTO {
+	return UserDTO{
+		ID:        user.ID,
+		Email:     user.Email,
+		FullName:  user.FullName,
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt.Format(time.RFC3339),
+	}
+}
+
 // ---------- Handlers ----------
 
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	ctx := c.Request.Context()
-
-	// Проверка занятости email
-	var exists bool
-	err := h.db.QueryRowxContext(ctx,
-		"SELECT EXISTS(SELECT 1 FROM users WHERE email=$1)", req.Email).Scan(&exists)
-	if err != nil {
-		h.log.Error("register: check email: " + err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
-	}
-	if exists {
-		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
 		return
 	}
 
@@ -97,22 +107,32 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	id := uuid.New()
-	_, err = h.db.ExecContext(ctx,
-		`INSERT INTO users (id, email, password_hash, full_name, status)
-		 VALUES ($1, $2, $3, $4, 'active')`,
-		id.String(), req.Email, string(hash), req.FullName)
-	if err != nil {
-		h.log.Error("register: insert user: " + err.Error())
+	now := time.Now()
+	user := &models.User{
+		ID:        uuid.NewString(),
+		Email:     req.Email,
+		Password:  string(hash),
+		FullName:  req.FullName,
+		Status:    "active",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := h.db.CreateUser(c.Request.Context(), user); err != nil {
+		if errors.Is(err, postgres.ErrDuplicateEmail) {
+			c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
+			return
+		}
+		h.log.Error("register: create user: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"id":        id.String(),
-		"email":     req.Email,
-		"full_name": req.FullName,
-		"status":    "active",
+		"id":        user.ID,
+		"email":     user.Email,
+		"full_name": user.FullName,
+		"status":    user.Status,
 	})
 }
 
@@ -125,18 +145,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	var row struct {
-		ID           uuid.UUID `db:"id"`
-		Email        string    `db:"email"`
-		PasswordHash string    `db:"password_hash"`
-		FullName     string    `db:"full_name"`
-		Status       string    `db:"status"`
-		CreatedAt    time.Time `db:"created_at"`
-	}
-
-	err := h.db.GetContext(ctx, &row,
-		`SELECT id, email, password_hash, full_name, status, created_at
-		 FROM users WHERE email=$1`, req.Email)
+	user, err := h.db.GetUserByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
@@ -147,27 +156,27 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(req.Password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 
 	// Статус проверяется после пароля, чтобы не раскрывать состояние аккаунта
 	// тому, кто его пароля не знает.
-	if row.Status != "active" {
-		h.log.Error("login: account is not active: " + row.ID.String())
+	if user.Status != "active" {
+		h.log.Error("login: account is not active: " + user.ID)
 		c.JSON(http.StatusForbidden, gin.H{"error": "account is not active"})
 		return
 	}
 
-	accessToken, expiresIn, err := h.tokens.IssueAccessToken(row.ID.String(), row.Email)
+	accessToken, expiresIn, err := h.tokens.IssueAccessToken(user.ID, user.Email)
 	if err != nil {
 		h.log.Error("login: issue access token: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
 
-	refreshToken, err := h.tokens.IssueRefreshToken(ctx, row.ID.String(), row.Email)
+	refreshToken, err := h.tokens.IssueRefreshToken(ctx, user.ID, user.Email)
 	if err != nil {
 		h.log.Error("login: issue refresh token: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -179,13 +188,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		RefreshToken: refreshToken,
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(expiresIn.Seconds()),
-		User: UserDTO{
-			ID:        row.ID.String(),
-			Email:     row.Email,
-			FullName:  row.FullName,
-			Status:    row.Status,
-			CreatedAt: row.CreatedAt.Format(time.RFC3339),
-		},
+		User:         userDTO(user),
 	})
 }
 
@@ -257,18 +260,7 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
-
-	var row struct {
-		ID        uuid.UUID `db:"id"`
-		Email     string    `db:"email"`
-		FullName  string    `db:"full_name"`
-		Status    string    `db:"status"`
-		CreatedAt time.Time `db:"created_at"`
-	}
-
-	err := h.db.GetContext(ctx, &row,
-		`SELECT id, email, full_name, status, created_at FROM users WHERE id=$1`, userID)
+	user, err := h.db.GetUser(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
@@ -279,15 +271,42 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, UserDTO{
-		ID:        row.ID.String(),
-		Email:     row.Email,
-		FullName:  row.FullName,
-		Status:    row.Status,
-		CreatedAt: row.CreatedAt.Format(time.RFC3339),
-	})
+	c.JSON(http.StatusOK, userDTO(user))
 }
 
+// UpdateProfile меняет отображаемое имя. Email и статус через этот эндпоинт
+// не меняются: смена адреса требует подтверждения владения.
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	userID, ok := middleware.UserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	if err := h.db.UpdateUser(ctx, userID, req.FullName); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		h.log.Error("update profile: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	user, err := h.db.GetUser(ctx, userID)
+	if err != nil {
+		h.log.Error("update profile: reload user: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, userDTO(user))
 }

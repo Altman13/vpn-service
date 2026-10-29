@@ -89,6 +89,7 @@ crl-verify /var/lib/vpn-service/pki/crl.pem
 | `POST` | `/api/v1/auth/refresh` | обмен refresh-токена на новую пару |
 | `POST` | `/api/v1/auth/logout` | отзыв access-токена и refresh-токена |
 | `GET` | `/api/v1/user/profile` | профиль текущего пользователя |
+| `PUT` | `/api/v1/user/profile` | изменить отображаемое имя (`full_name`) |
 | `POST` | `/api/v1/vpn/devices` | создать устройство (`device_name`, `protocol`) |
 | `GET` | `/api/v1/vpn/devices` | устройства текущего пользователя |
 | `GET` | `/api/v1/vpn/devices/:id/config` | конфиг устройства |
