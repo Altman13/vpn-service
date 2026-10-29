@@ -33,7 +33,12 @@ const (
 	refreshTokenBytes = 32
 )
 
-var ErrInvalidRefreshToken = errors.New("invalid refresh token")
+var (
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	// ErrRefreshTokenReused — предъявлен уже погашенный токен. Это признак
+	// кражи: клиент так не делает, значит токен был у кого-то ещё.
+	ErrRefreshTokenReused = errors.New("refresh token reuse detected")
+)
 
 // Claims — полезная нагрузка access-токена.
 type Claims struct {
@@ -46,6 +51,9 @@ type Claims struct {
 type refreshRecord struct {
 	UserID string `json:"user_id"`
 	Email  string `json:"email"`
+	// Family — цепочка токенов одного входа. При повторном использовании
+	// гасится вся цепочка, а не только предъявленный токен.
+	Family string `json:"family"`
 }
 
 // Store — хранилище refresh-токенов и блэклиста access-токенов.
@@ -56,6 +64,17 @@ type Store interface {
 	DeleteRefreshToken(ctx context.Context, hash string) error
 	RevokeAccessToken(ctx context.Context, jti string, ttl time.Duration) error
 	IsAccessTokenRevoked(ctx context.Context, jti string) (bool, error)
+
+	// SaveFamilyToken запоминает текущий (единственный активный) токен семейства.
+	SaveFamilyToken(ctx context.Context, family, hash string, ttl time.Duration) error
+	// LoadFamilyToken возвращает пустую строку, если семейства нет.
+	LoadFamilyToken(ctx context.Context, family string) (string, error)
+	DeleteFamilyToken(ctx context.Context, family string) error
+	// MarkRefreshUsed оставляет метку о погашенном токене: по ней повторное
+	// предъявление отличается от неизвестного токена.
+	MarkRefreshUsed(ctx context.Context, hash, family string, ttl time.Duration) error
+	// UsedRefreshFamily возвращает семейство погашенного токена или "".
+	UsedRefreshFamily(ctx context.Context, hash string) (string, error)
 }
 
 type Service struct {
@@ -106,19 +125,28 @@ func (s *Service) IssueAccessToken(userID, email string) (string, time.Duration,
 }
 
 func (s *Service) IssueRefreshToken(ctx context.Context, userID, email string) (string, error) {
+	return s.issueRefreshToken(ctx, userID, email, uuid.NewString())
+}
+
+func (s *Service) issueRefreshToken(ctx context.Context, userID, email, family string) (string, error) {
 	raw := make([]byte, refreshTokenBytes)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("generate refresh token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw)
+	hash := hashToken(token)
+	ttl := s.RefreshTTL()
 
-	record, err := json.Marshal(refreshRecord{UserID: userID, Email: email})
+	record, err := json.Marshal(refreshRecord{UserID: userID, Email: email, Family: family})
 	if err != nil {
 		return "", fmt.Errorf("encode refresh record: %w", err)
 	}
 
-	if err := s.store.SaveRefreshToken(ctx, hashToken(token), string(record), s.RefreshTTL()); err != nil {
+	if err := s.store.SaveRefreshToken(ctx, hash, string(record), ttl); err != nil {
 		return "", fmt.Errorf("save refresh token: %w", err)
+	}
+	if err := s.store.SaveFamilyToken(ctx, family, hash, ttl); err != nil {
+		return "", fmt.Errorf("save token family: %w", err)
 	}
 	return token, nil
 }
@@ -136,7 +164,7 @@ func (s *Service) RotateRefreshToken(ctx context.Context, refreshToken string) (
 		return "", "", 0, fmt.Errorf("load refresh token: %w", err)
 	}
 	if value == "" {
-		return "", "", 0, ErrInvalidRefreshToken
+		return "", "", 0, s.handleMissingToken(ctx, hash)
 	}
 
 	var record refreshRecord
@@ -149,17 +177,51 @@ func (s *Service) RotateRefreshToken(ctx context.Context, refreshToken string) (
 	if err := s.store.DeleteRefreshToken(ctx, hash); err != nil {
 		return "", "", 0, fmt.Errorf("consume refresh token: %w", err)
 	}
+	// Метка нужна, чтобы отличить повторное предъявление от неизвестного токена.
+	if err := s.store.MarkRefreshUsed(ctx, hash, record.Family, s.RefreshTTL()); err != nil {
+		return "", "", 0, fmt.Errorf("mark refresh token used: %w", err)
+	}
 
 	accessToken, accessTTL, err = s.IssueAccessToken(record.UserID, record.Email)
 	if err != nil {
 		return "", "", 0, err
 	}
-	newRefreshToken, err = s.IssueRefreshToken(ctx, record.UserID, record.Email)
+	newRefreshToken, err = s.issueRefreshToken(ctx, record.UserID, record.Email, record.Family)
 	if err != nil {
 		return "", "", 0, err
 	}
 
 	return accessToken, newRefreshToken, accessTTL, nil
+}
+
+// handleMissingToken разбирает случай, когда токена нет среди активных.
+// Если осталась метка об использовании — токен украли и предъявили повторно,
+// поэтому гасится вся цепочка: легитимный клиент получит 401 и войдёт заново.
+func (s *Service) handleMissingToken(ctx context.Context, hash string) error {
+	family, err := s.store.UsedRefreshFamily(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("check refresh token reuse: %w", err)
+	}
+	if family == "" {
+		return ErrInvalidRefreshToken
+	}
+	if err := s.revokeFamily(ctx, family); err != nil {
+		return fmt.Errorf("revoke token family: %w", err)
+	}
+	return ErrRefreshTokenReused
+}
+
+func (s *Service) revokeFamily(ctx context.Context, family string) error {
+	current, err := s.store.LoadFamilyToken(ctx, family)
+	if err != nil {
+		return err
+	}
+	if current != "" {
+		if err := s.store.DeleteRefreshToken(ctx, current); err != nil {
+			return err
+		}
+	}
+	return s.store.DeleteFamilyToken(ctx, family)
 }
 
 // RevokeAccessToken заносит jti в блэклист до истечения срока токена.
@@ -183,7 +245,20 @@ func (s *Service) RevokeRefreshToken(ctx context.Context, refreshToken string) e
 	if refreshToken == "" {
 		return nil
 	}
-	return s.store.DeleteRefreshToken(ctx, hashToken(refreshToken))
+
+	hash := hashToken(refreshToken)
+	// Семейство удаляется вместе с токеном: logout не должен оставлять
+	// активную ссылку, по которой можно отозвать чужую цепочку.
+	if value, err := s.store.LoadRefreshToken(ctx, hash); err == nil && value != "" {
+		var record refreshRecord
+		if json.Unmarshal([]byte(value), &record) == nil && record.Family != "" {
+			if err := s.store.DeleteFamilyToken(ctx, record.Family); err != nil {
+				return err
+			}
+		}
+	}
+
+	return s.store.DeleteRefreshToken(ctx, hash)
 }
 
 func (s *Service) IsAccessTokenRevoked(ctx context.Context, jti string) (bool, error) {

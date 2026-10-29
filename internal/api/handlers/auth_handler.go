@@ -207,12 +207,18 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	accessToken, refreshToken, expiresIn, err := h.tokens.RotateRefreshToken(c.Request.Context(), req.RefreshToken)
 	if err != nil {
-		if errors.Is(err, auth.ErrInvalidRefreshToken) {
+		switch {
+		case errors.Is(err, auth.ErrRefreshTokenReused):
+			// Признак кражи: клиент так себя не ведёт. Цепочка уже отозвана,
+			// клиенту отвечаем так же, как на любой невалидный токен.
+			h.log.Error("refresh: refresh token reuse detected, token family revoked")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
-			return
+		case errors.Is(err, auth.ErrInvalidRefreshToken):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
+		default:
+			h.log.Error("refresh: " + err.Error())
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		}
-		h.log.Error("refresh: " + err.Error())
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
 

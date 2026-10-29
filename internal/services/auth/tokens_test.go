@@ -18,6 +18,8 @@ type memStore struct {
 	mu       sync.Mutex
 	refresh  map[string]string
 	revoked  map[string]time.Time
+	family   map[string]string
+	used     map[string]string
 	failSave bool
 }
 
@@ -25,7 +27,42 @@ func newMemStore() *memStore {
 	return &memStore{
 		refresh: make(map[string]string),
 		revoked: make(map[string]time.Time),
+		family:  make(map[string]string),
+		used:    make(map[string]string),
 	}
+}
+
+func (s *memStore) SaveFamilyToken(_ context.Context, family, hash string, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.family[family] = hash
+	return nil
+}
+
+func (s *memStore) LoadFamilyToken(_ context.Context, family string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.family[family], nil
+}
+
+func (s *memStore) DeleteFamilyToken(_ context.Context, family string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.family, family)
+	return nil
+}
+
+func (s *memStore) MarkRefreshUsed(_ context.Context, hash, family string, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.used[hash] = family
+	return nil
+}
+
+func (s *memStore) UsedRefreshFamily(_ context.Context, hash string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.used[hash], nil
 }
 
 func (s *memStore) SaveRefreshToken(_ context.Context, hash, value string, _ time.Duration) error {
@@ -171,8 +208,45 @@ func TestRotateRefreshTokenIssuesNewPair(t *testing.T) {
 		t.Fatal("новый access-токен выписан не тому пользователю")
 	}
 
-	if _, _, _, err := service.RotateRefreshToken(ctx, refresh); !errors.Is(err, ErrInvalidRefreshToken) {
-		t.Fatalf("повторное использование старого токена: ожидалась ErrInvalidRefreshToken, получено %v", err)
+	if _, _, _, err := service.RotateRefreshToken(ctx, refresh); !errors.Is(err, ErrRefreshTokenReused) {
+		t.Fatalf("повторное использование старого токена: ожидалась ErrRefreshTokenReused, получено %v", err)
+	}
+}
+
+// Повторное предъявление погашенного токена — признак кражи, поэтому
+// гасится вся цепочка, а не только предъявленный токен.
+func TestReuseRevokesWholeFamily(t *testing.T) {
+	store := newMemStore()
+	service := New(testConfig(), store)
+	ctx := context.Background()
+
+	first, err := service.IssueRefreshToken(ctx, "user-1", "user@example.com")
+	if err != nil {
+		t.Fatalf("выпуск: %v", err)
+	}
+
+	_, second, _, err := service.RotateRefreshToken(ctx, first)
+	if err != nil {
+		t.Fatalf("первая ротация: %v", err)
+	}
+
+	// Злоумышленник предъявляет украденный (уже использованный) токен.
+	if _, _, _, err := service.RotateRefreshToken(ctx, first); !errors.Is(err, ErrRefreshTokenReused) {
+		t.Fatalf("ожидалась ErrRefreshTokenReused, получено %v", err)
+	}
+
+	// Легитимный клиент со свежим токеном тоже теряет доступ — цепочка отозвана.
+	if _, _, _, err := service.RotateRefreshToken(ctx, second); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("семейство не отозвано, токен продолжает работать: %v", err)
+	}
+}
+
+// Неизвестный токен — это не повтор, отдельного сигнала о краже быть не должно.
+func TestUnknownTokenIsNotReportedAsReuse(t *testing.T) {
+	service := New(testConfig(), newMemStore())
+
+	if _, _, _, err := service.RotateRefreshToken(context.Background(), "never-issued"); !errors.Is(err, ErrInvalidRefreshToken) {
+		t.Fatalf("ожидалась ErrInvalidRefreshToken, получено %v", err)
 	}
 }
 

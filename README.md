@@ -107,6 +107,7 @@ crl-verify /var/lib/vpn-service/pki/crl.pem
 | Access-токен | `jwt.expire_time` (часы) | JWT с `jti`, тип `access` |
 | Refresh-токен | `jwt.refresh_expire_time` (часы) | непрозрачная строка, в Redis только SHA-256; одноразовый (ротация) |
 | Отзыв доступа | — | `POST /auth/logout` кладёт `jti` в блэклист до истечения срока; заблокированный пользователь теряет доступ сразу |
+| Кража refresh-токена | — | повторное предъявление погашенного токена гасит всю цепочку токенов этого входа |
 | Rate limit | `security.rate_limit.*` | 10 запросов/минуту на IP для `/auth/login`, `/auth/register`, `/auth/refresh`; счётчики в Redis, общие для всех реплик |
 | CORS | `security.cors.allowed_origins` | пустой список = CORS-заголовки не отдаются |
 | Шифрование ключей | `security.encryption_key` | AES-256-GCM для приватных ключей устройств в БД; пусто = без шифрования (только для разработки) |

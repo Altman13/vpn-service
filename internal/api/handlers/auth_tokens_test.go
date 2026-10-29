@@ -18,18 +18,55 @@ import (
 	"vpn-service/pkg/logger"
 )
 
-// memTokenStore — хранилище refresh-токенов и блэклиста в памяти.
+// memTokenStore — хранилище refresh-токенов, их семейств и блэклиста в памяти.
 type memTokenStore struct {
 	mu      sync.Mutex
 	refresh map[string]string
 	revoked map[string]struct{}
+	family  map[string]string
+	used    map[string]string
 }
 
 func newMemTokenStore() *memTokenStore {
 	return &memTokenStore{
 		refresh: make(map[string]string),
 		revoked: make(map[string]struct{}),
+		family:  make(map[string]string),
+		used:    make(map[string]string),
 	}
+}
+
+func (s *memTokenStore) SaveFamilyToken(_ context.Context, family, hash string, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.family[family] = hash
+	return nil
+}
+
+func (s *memTokenStore) LoadFamilyToken(_ context.Context, family string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.family[family], nil
+}
+
+func (s *memTokenStore) DeleteFamilyToken(_ context.Context, family string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.family, family)
+	return nil
+}
+
+func (s *memTokenStore) MarkRefreshUsed(_ context.Context, hash, family string, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.used[hash] = family
+	return nil
+}
+
+func (s *memTokenStore) UsedRefreshFamily(_ context.Context, hash string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.used[hash], nil
 }
 
 func (s *memTokenStore) SaveRefreshToken(_ context.Context, hash, value string, _ time.Duration) error {
@@ -216,5 +253,34 @@ func TestLogoutRequiresAuthentication(t *testing.T) {
 	recorder := postJSON(t, router, "/api/v1/auth/logout", "", map[string]string{})
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("ожидался 401, получен %d (%s)", recorder.Code, recorder.Body.String())
+	}
+}
+
+// Повторная отправка уже обменянного токена — признак кражи: отзывается вся
+// цепочка, поэтому только что выданный токен тоже перестаёт работать.
+func TestRefreshReuseRevokesIssuedTokens(t *testing.T) {
+	router, service := newAuthRouter(t)
+	_, refresh := issuePair(t, service)
+
+	first := postJSON(t, router, "/api/v1/auth/refresh", "", map[string]string{"refresh_token": refresh})
+	if first.Code != http.StatusOK {
+		t.Fatalf("первый обмен: получен %d (%s)", first.Code, first.Body.String())
+	}
+
+	var issued struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &issued); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	replay := postJSON(t, router, "/api/v1/auth/refresh", "", map[string]string{"refresh_token": refresh})
+	if replay.Code != http.StatusUnauthorized {
+		t.Fatalf("повтор токена: получен %d", replay.Code)
+	}
+
+	legitimate := postJSON(t, router, "/api/v1/auth/refresh", "", map[string]string{"refresh_token": issued.RefreshToken})
+	if legitimate.Code != http.StatusUnauthorized {
+		t.Fatalf("цепочка не отозвана: получен %d (%s)", legitimate.Code, legitimate.Body.String())
 	}
 }

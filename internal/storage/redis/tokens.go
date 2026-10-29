@@ -11,6 +11,8 @@ import (
 const (
 	refreshTokenPrefix = "auth:refresh:"
 	revokedTokenPrefix = "auth:revoked:"
+	familyPrefix       = "auth:family:"
+	usedTokenPrefix    = "auth:used:"
 )
 
 // incrementScript увеличивает счётчик и выставляет TTL только при создании
@@ -72,4 +74,42 @@ func (c *Client) IsAccessTokenRevoked(ctx context.Context, jti string) (bool, er
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// SaveFamilyToken хранит текущий токен семейства. В семействе всегда один
+// активный refresh-токен, поэтому хватает обычного ключа, без множества.
+func (c *Client) SaveFamilyToken(ctx context.Context, family, hash string, ttl time.Duration) error {
+	return c.Client.Set(ctx, familyPrefix+family, hash, ttl).Err()
+}
+
+func (c *Client) LoadFamilyToken(ctx context.Context, family string) (string, error) {
+	value, err := c.Client.Get(ctx, familyPrefix+family).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func (c *Client) DeleteFamilyToken(ctx context.Context, family string) error {
+	return c.Client.Del(ctx, familyPrefix+family).Err()
+}
+
+// MarkRefreshUsed оставляет метку о погашенном токене на срок его жизни:
+// по ней повторное предъявление отличается от неизвестного токена.
+func (c *Client) MarkRefreshUsed(ctx context.Context, hash, family string, ttl time.Duration) error {
+	return c.Client.Set(ctx, usedTokenPrefix+hash, family, ttl).Err()
+}
+
+func (c *Client) UsedRefreshFamily(ctx context.Context, hash string) (string, error) {
+	value, err := c.Client.Get(ctx, usedTokenPrefix+hash).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return value, nil
 }
