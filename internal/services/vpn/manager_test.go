@@ -12,30 +12,35 @@ import (
 )
 
 // memStore повторяет поведение SQL-хранилища, включая частичный уникальный
-// индекс по ip_address.
+// индекс по ip_address: адрес выделяется до вставки, а конфликт отвергается.
 type memStore struct {
-	devices       map[string]*models.Device
-	failCreations int
-	createErr     error
+	devices map[string]*models.Device
 }
 
 func newMemStore() *memStore {
 	return &memStore{devices: make(map[string]*models.Device)}
 }
 
-func (s *memStore) CreateDevice(_ context.Context, device *models.Device) error {
-	if s.failCreations > 0 {
-		s.failCreations--
-		return errors.New("duplicate key value violates unique constraint \"idx_devices_ip_active\"")
-	}
-	if s.createErr != nil {
-		return s.createErr
-	}
+func (s *memStore) CreateDeviceWithAddress(_ context.Context, device *models.Device, allocate func(used []string) (string, error)) error {
+	used := make([]string, 0, len(s.devices))
 	for _, existing := range s.devices {
-		if existing.Status != "revoked" && existing.IPAddress != "" && existing.IPAddress == device.IPAddress {
+		if existing.Status != "revoked" && existing.IPAddress != "" {
+			used = append(used, existing.IPAddress)
+		}
+	}
+
+	address, err := allocate(used)
+	if err != nil {
+		return err
+	}
+	device.IPAddress = address
+
+	for _, existing := range s.devices {
+		if existing.Status != "revoked" && existing.IPAddress == address {
 			return errors.New("duplicate key value violates unique constraint \"idx_devices_ip_active\"")
 		}
 	}
+
 	copied := *device
 	s.devices[device.ID] = &copied
 	return nil
@@ -69,16 +74,6 @@ func (s *memStore) UpdateDeviceStatus(_ context.Context, id, status string) erro
 func (s *memStore) DeleteDevice(_ context.Context, id string) error {
 	delete(s.devices, id)
 	return nil
-}
-
-func (s *memStore) ListAllocatedIPs(_ context.Context) ([]string, error) {
-	addresses := make([]string, 0, len(s.devices))
-	for _, device := range s.devices {
-		if device.Status != "revoked" && device.IPAddress != "" {
-			addresses = append(addresses, device.IPAddress)
-		}
-	}
-	return addresses, nil
 }
 
 func (s *memStore) SetDeviceCertSerial(_ context.Context, id, serial string) error {
@@ -157,17 +152,25 @@ func TestCreateDeviceReusesAddressAfterRevoke(t *testing.T) {
 	}
 }
 
-func TestCreateDeviceRetriesOnAddressConflict(t *testing.T) {
+// Если свободных адресов нет, устройство не создаётся и в БД ничего не остаётся.
+func TestCreateDeviceFailsWhenSubnetIsExhausted(t *testing.T) {
 	store := newMemStore()
-	store.failCreations = 1
 	manager := newTestManager(store)
-
-	device, err := manager.CreateDevice(context.Background(), "user-1", "laptop", ProtocolWireGuard)
-	if err != nil {
-		t.Fatalf("после повтора устройство не создано: %v", err)
+	manager.wgConfig.NetworkCIDR = "10.0.0.0/30" // .1 — шлюз, .3 — broadcast, клиенту только .2
+	store.devices["taken"] = &models.Device{
+		ID:        "taken",
+		UserID:    "user-2",
+		Protocol:  ProtocolWireGuard,
+		IPAddress: "10.0.0.2",
+		Status:    "active",
 	}
-	if device.IPAddress != "10.0.0.2" {
-		t.Fatalf("адрес %q, ожидался 10.0.0.2", device.IPAddress)
+
+	_, err := manager.CreateDevice(context.Background(), "user-1", "laptop", ProtocolWireGuard)
+	if err == nil {
+		t.Fatal("ожидалась ошибка: свободных адресов нет")
+	}
+	if len(store.devices) != 1 {
+		t.Fatalf("в хранилище добавились устройства: %d", len(store.devices))
 	}
 }
 

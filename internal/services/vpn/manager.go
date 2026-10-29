@@ -26,11 +26,6 @@ var (
 const (
 	ProtocolWireGuard = "wireguard"
 	ProtocolOpenVPN   = "openvpn"
-
-	// ipAllocationAttempts — сколько раз пытаться вставить устройство, если
-	// параллельный запрос занял выбранный адрес. Окончательную защиту даёт
-	// уникальный индекс в БД, а не этот счётчик.
-	ipAllocationAttempts = 2
 )
 
 // WireGuardConfig конфигурация WireGuard
@@ -65,13 +60,14 @@ type OpenVPNConfig struct {
 // DeviceStore — часть хранилища устройств, которая нужна менеджеру.
 // Интерфейс позволяет тестировать менеджер и хендлеры без реальной БД.
 type DeviceStore interface {
-	CreateDevice(ctx context.Context, device *models.Device) error
+	// CreateDeviceWithAddress выделяет адрес и вставляет устройство атомарно:
+	// функция allocate получает занятые адреса и возвращает свободный.
+	// Выбор адреса и вставка выполняются под блокировкой хранилища.
+	CreateDeviceWithAddress(ctx context.Context, device *models.Device, allocate func(used []string) (string, error)) error
 	GetDeviceForUser(ctx context.Context, id, userID string) (*models.Device, error)
 	GetDevicesByUser(ctx context.Context, userID string) ([]models.Device, error)
 	UpdateDeviceStatus(ctx context.Context, id, status string) error
 	DeleteDevice(ctx context.Context, id string) error
-	// ListAllocatedIPs возвращает адреса, занятые неотозванными устройствами.
-	ListAllocatedIPs(ctx context.Context) ([]string, error)
 	// SetDeviceCertSerial сохраняет серийный номер сертификата OpenVPN,
 	// чтобы устройство можно было отозвать.
 	SetDeviceCertSerial(ctx context.Context, id, serial string) error
@@ -183,41 +179,15 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 // insertWithAddress подбирает свободный адрес и вставляет устройство.
 // При конфликте адреса (параллельный запрос успел раньше) попытка повторяется.
 func (m *Manager) insertWithAddress(ctx context.Context, device *models.Device) error {
-	var lastErr error
-
-	for attempt := 0; attempt < ipAllocationAttempts; attempt++ {
-		used, err := m.usedAddresses(ctx)
-		if err != nil {
-			return err
+	// Выбор адреса выполняется внутри транзакции хранилища: список занятых
+	// адресов и вставка защищены блокировкой, поэтому повторы не нужны.
+	return m.db.CreateDeviceWithAddress(ctx, device, func(used []string) (string, error) {
+		taken := make(map[string]struct{}, len(used))
+		for _, address := range used {
+			taken[address] = struct{}{}
 		}
-
-		address, err := allocateIP(m.wgConfig.NetworkCIDR, used)
-		if err != nil {
-			return err
-		}
-		device.IPAddress = address
-
-		if err := m.db.CreateDevice(ctx, device); err != nil {
-			lastErr = err
-			continue
-		}
-		return nil
-	}
-
-	return lastErr
-}
-
-func (m *Manager) usedAddresses(ctx context.Context) (map[string]struct{}, error) {
-	addresses, err := m.db.ListAllocatedIPs(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	used := make(map[string]struct{}, len(addresses))
-	for _, address := range addresses {
-		used[address] = struct{}{}
-	}
-	return used, nil
+		return allocateIP(m.wgConfig.NetworkCIDR, taken)
+	})
 }
 
 // GetDeviceConfig возвращает конфигурацию только для устройства, принадлежащего userID.

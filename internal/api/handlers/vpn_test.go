@@ -46,8 +46,23 @@ func (s *fakeDeviceStore) seed(device *models.Device) {
 	s.devices[device.ID] = device
 }
 
-func (s *fakeDeviceStore) CreateDevice(_ context.Context, device *models.Device) error {
-	s.seed(device)
+func (s *fakeDeviceStore) CreateDeviceWithAddress(_ context.Context, device *models.Device, allocate func(used []string) (string, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	used := make([]string, 0, len(s.devices))
+	for _, existing := range s.devices {
+		if existing.Status != "revoked" && existing.IPAddress != "" {
+			used = append(used, existing.IPAddress)
+		}
+	}
+
+	address, err := allocate(used)
+	if err != nil {
+		return err
+	}
+	device.IPAddress = address
+	s.devices[device.ID] = device
 	return nil
 }
 
@@ -87,19 +102,6 @@ func (s *fakeDeviceStore) DeleteDevice(_ context.Context, id string) error {
 	defer s.mu.Unlock()
 	delete(s.devices, id)
 	return nil
-}
-
-func (s *fakeDeviceStore) ListAllocatedIPs(_ context.Context) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	addresses := make([]string, 0, len(s.devices))
-	for _, device := range s.devices {
-		if device.Status != "revoked" && device.IPAddress != "" {
-			addresses = append(addresses, device.IPAddress)
-		}
-	}
-	return addresses, nil
 }
 
 func (s *fakeDeviceStore) SetDeviceCertSerial(_ context.Context, id, serial string) error {
