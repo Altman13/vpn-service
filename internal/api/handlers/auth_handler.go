@@ -7,27 +7,26 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"vpn-service/internal/api/middleware"
-	"vpn-service/internal/config"
+	"vpn-service/internal/services/auth"
 	"vpn-service/internal/storage/postgres"
 	"vpn-service/pkg/logger"
 )
 
 type AuthHandler struct {
-	jwtConfig config.JWTConfig
-	db        *postgres.DB
-	log       *logger.Logger
+	tokens *auth.Service
+	db     *postgres.DB
+	log    *logger.Logger
 }
 
-func NewAuthHandler(jwtConfig config.JWTConfig, db *postgres.DB, log *logger.Logger) *AuthHandler {
+func NewAuthHandler(tokens *auth.Service, db *postgres.DB, log *logger.Logger) *AuthHandler {
 	return &AuthHandler{
-		jwtConfig: jwtConfig,
-		db:        db,
-		log:       log,
+		tokens: tokens,
+		db:     db,
+		log:    log,
 	}
 }
 
@@ -35,13 +34,19 @@ func NewAuthHandler(jwtConfig config.JWTConfig, db *postgres.DB, log *logger.Log
 
 type RegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
 	FullName string `json:"full_name" binding:"required"`
 }
 
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
+}
+
+// refreshRequest используется и при обмене refresh-токена, и при logout,
+// поэтому поле необязательное.
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 type UserDTO struct {
@@ -53,9 +58,11 @@ type UserDTO struct {
 }
 
 type AuthResponse struct {
-	AccessToken string  `json:"access_token"`
-	ExpiresIn   int64   `json:"expires_in"`
-	User        UserDTO `json:"user"`
+	AccessToken  string  `json:"access_token"`
+	RefreshToken string  `json:"refresh_token,omitempty"`
+	TokenType    string  `json:"token_type"`
+	ExpiresIn    int64   `json:"expires_in"`
+	User         UserDTO `json:"user"`
 }
 
 // ---------- Handlers ----------
@@ -145,27 +152,33 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	expiresIn := time.Duration(h.jwtConfig.ExpireTime) * time.Hour
-	claims := middleware.Claims{
-		UserID: row.ID.String(),
-		Email:  row.Email,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
+	// Статус проверяется после пароля, чтобы не раскрывать состояние аккаунта
+	// тому, кто его пароля не знает.
+	if row.Status != "active" {
+		h.log.Error("login: account is not active: " + row.ID.String())
+		c.JSON(http.StatusForbidden, gin.H{"error": "account is not active"})
+		return
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte(h.jwtConfig.Secret))
+	accessToken, expiresIn, err := h.tokens.IssueAccessToken(row.ID.String(), row.Email)
 	if err != nil {
-		h.log.Error("login: sign token: " + err.Error())
+		h.log.Error("login: issue access token: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	refreshToken, err := h.tokens.IssueRefreshToken(ctx, row.ID.String(), row.Email)
+	if err != nil {
+		h.log.Error("login: issue refresh token: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
 
 	c.JSON(http.StatusOK, AuthResponse{
-		AccessToken: signed,
-		ExpiresIn:   int64(expiresIn.Seconds()),
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(expiresIn.Seconds()),
 		User: UserDTO{
 			ID:        row.ID.String(),
 			Email:     row.Email,
@@ -176,18 +189,70 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	})
 }
 
+// RefreshToken обменивает refresh-токен на новую пару. Старый токен
+// при этом погашается, поэтому повторная отправка вернёт 401.
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	var req refreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.RefreshToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token is required"})
+		return
+	}
+
+	accessToken, refreshToken, expiresIn, err := h.tokens.RotateRefreshToken(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidRefreshToken) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
+			return
+		}
+		h.log.Error("refresh: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    int64(expiresIn.Seconds()),
+	})
 }
 
-func (h *AuthHandler) GetProfile(c *gin.Context) {
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
+// Logout отзывает текущий access-токен (через блэклист) и, если он передан,
+// refresh-токен.
+func (h *AuthHandler) Logout(c *gin.Context) {
+	claims, ok := middleware.ClaimsFrom(c)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	userIDStr, ok := userIDVal.(string)
-	if !ok || userIDStr == "" {
+
+	ctx := c.Request.Context()
+
+	var req refreshRequest
+	// Тело необязательно: достаточно access-токена.
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.tokens.RevokeAccessToken(ctx, claims); err != nil {
+		h.log.Error("logout: revoke access token: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if err := h.tokens.RevokeRefreshToken(ctx, req.RefreshToken); err != nil {
+		h.log.Error("logout: revoke refresh token: " + err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
+func (h *AuthHandler) GetProfile(c *gin.Context) {
+	userID, ok := middleware.UserID(c)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
@@ -203,7 +268,7 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 	}
 
 	err := h.db.GetContext(ctx, &row,
-		`SELECT id, email, full_name, status, created_at FROM users WHERE id=$1`, userIDStr)
+		`SELECT id, email, full_name, status, created_at FROM users WHERE id=$1`, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})

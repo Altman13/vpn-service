@@ -1,3 +1,8 @@
+-- ВНИМАНИЕ: файл применяется только через goose (make migrate-up).
+-- Не монтируйте каталог scripts/migrations в /docker-entrypoint-initdb.d:
+-- psql выполнит файл целиком, включая секцию Down, и удалит таблицы.
+-- Для docker-compose используйте deployments/docker/init/001_schema.sql.
+
 -- +goose Up
 -- Создание таблицы пользователей
 CREATE TABLE IF NOT EXISTS users (

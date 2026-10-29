@@ -1,9 +1,7 @@
 package middleware
 
-import "github.com/golang-jwt/jwt/v5"
+import "vpn-service/internal/services/auth"
 
-type Claims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	jwt.RegisteredClaims
-}
+// Claims — полезная нагрузка access-токена. Алиас, а не копия структуры:
+// поля токена должны описываться в одном месте.
+type Claims = auth.Claims

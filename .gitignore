@@ -53,3 +53,7 @@ configs/config.yaml
 # Go work files
 go.work
 go.work.sum
+
+# Локальный кэш сборки (используется, когда системный каталог недоступен)
+/.gocache/
+/.gotmp/

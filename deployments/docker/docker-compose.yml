@@ -11,7 +11,9 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../../scripts/migrations:/docker-entrypoint-initdb.d
+      # Только Up-часть схемы: goose-файл целиком psql выполнить нельзя,
+      # иначе DROP-секция удалит только что созданные таблицы.
+      - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s

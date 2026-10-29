@@ -17,7 +17,20 @@ redis:
 
 jwt:
   secret: "change-me-in-production"
-  expire_time: 24
+  # Срок жизни access-токена, часы. Для боевого окружения — 0.25–1.
+  expire_time: 1
+  # Срок жизни refresh-токена, часы (30 дней).
+  refresh_expire_time: 720
+
+security:
+  rate_limit:
+    enabled: true
+    # Не более 10 запросов на /auth/* с одного IP за минуту.
+    requests: 10
+    window_seconds: 60
+  cors:
+    # Пустой список = CORS выключен. Перечислите доверенные origin.
+    allowed_origins: []
 
 vpn:
   wireguard:
@@ -26,6 +39,13 @@ vpn:
     private_key: "change-me"
     public_key: "change-me"
     network_cidr: "10.0.0.0/24"
+    # Адрес сервера в клиентских конфигах: замените на реальный хост.
+    endpoint: "vpn.example.com"
+    dns: "1.1.1.1, 8.8.8.8"
+    allowed_ips: "0.0.0.0/0"
+    # true — применять пиров через `wg set` (нужны права на интерфейс).
+    # false — сервис только выдаёт конфиги, интерфейсом управляют снаружи.
+    enabled: false
 
   openvpn:
     config_path: "/etc/openvpn/server.conf"

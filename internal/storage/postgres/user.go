@@ -44,6 +44,14 @@ func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, e
 	return &user, nil
 }
 
+// GetUserStatus возвращает статус пользователя.
+// Если пользователя нет, возвращается sql.ErrNoRows.
+func (db *DB) GetUserStatus(ctx context.Context, id string) (string, error) {
+	var status string
+	err := db.GetContext(ctx, &status, `SELECT status FROM users WHERE id = $1`, id)
+	return status, err
+}
+
 func (db *DB) UpdateUser(ctx context.Context, id, fullName string) error {
 	query := `UPDATE users SET full_name = $1, updated_at = NOW() WHERE id = $2`
 	_, err := db.ExecContext(ctx, query, fullName, id)

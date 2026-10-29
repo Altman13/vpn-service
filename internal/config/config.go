@@ -12,6 +12,7 @@ type Config struct {
 	Database      DatabaseConfig `mapstructure:"database"`
 	Redis         RedisConfig    `mapstructure:"redis"`
 	JWT           JWTConfig      `mapstructure:"jwt"`
+	Security      SecurityConfig `mapstructure:"security"`
 	VPN           VPNConfig      `mapstructure:"vpn"`
 }
 
@@ -32,8 +33,31 @@ type RedisConfig struct {
 }
 
 type JWTConfig struct {
-	Secret     string `mapstructure:"secret"`
-	ExpireTime int    `mapstructure:"expire_time"`
+	Secret string `mapstructure:"secret"`
+	// ExpireTime — срок жизни access-токена в часах.
+	ExpireTime int `mapstructure:"expire_time"`
+	// RefreshExpireTime — срок жизни refresh-токена в часах.
+	RefreshExpireTime int `mapstructure:"refresh_expire_time"`
+}
+
+// SecurityConfig описывает ограничения, не относящиеся к конкретному API.
+type SecurityConfig struct {
+	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+	CORS      CORSConfig      `mapstructure:"cors"`
+}
+
+type RateLimitConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Requests — сколько запросов разрешено за окно.
+	Requests int `mapstructure:"requests"`
+	// WindowSeconds — длина окна в секундах.
+	WindowSeconds int `mapstructure:"window_seconds"`
+}
+
+type CORSConfig struct {
+	// AllowedOrigins — список разрешённых origin. Пустой список означает,
+	// что CORS-заголовки не отдаются вовсе.
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
 }
 
 type VPNConfig struct {
@@ -47,6 +71,14 @@ type WireGuardConfig struct {
 	PrivateKey    string `mapstructure:"private_key"`
 	PublicKey     string `mapstructure:"public_key"`
 	NetworkCIDR   string `mapstructure:"network_cidr"`
+	// Endpoint — адрес сервера, который попадает в клиентские конфиги.
+	Endpoint string `mapstructure:"endpoint"`
+	DNS      string `mapstructure:"dns"`
+	// AllowedIPs — какие сети клиент гонит в туннель.
+	AllowedIPs string `mapstructure:"allowed_ips"`
+	// Enabled включает применение пиров к интерфейсу через wg.
+	// false — сервис только выдаёт конфиги, интерфейсом управляют снаружи.
+	Enabled bool `mapstructure:"enabled"`
 }
 
 type OpenVPNConfig struct {
