@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"vpn-service/internal/api/middleware"
+	"vpn-service/internal/metrics"
 	"vpn-service/internal/services/auth"
 	"vpn-service/internal/storage/models"
 	"vpn-service/internal/storage/postgres"
@@ -148,15 +149,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	user, err := h.db.GetUserByEmail(ctx, req.Email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			metrics.LoginAttempt("invalid_credentials")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
+		metrics.LoginAttempt("error")
 		h.log.Error("login: query user: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		metrics.LoginAttempt("invalid_credentials")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -164,6 +168,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Статус проверяется после пароля, чтобы не раскрывать состояние аккаунта
 	// тому, кто его пароля не знает.
 	if user.Status != "active" {
+		metrics.LoginAttempt("blocked")
 		h.log.Error("login: account is not active: " + user.ID)
 		c.JSON(http.StatusForbidden, gin.H{"error": "account is not active"})
 		return
@@ -171,6 +176,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	accessToken, expiresIn, err := h.tokens.IssueAccessToken(user.ID, user.Email)
 	if err != nil {
+		metrics.LoginAttempt("error")
 		h.log.Error("login: issue access token: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
@@ -178,10 +184,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	refreshToken, err := h.tokens.IssueRefreshToken(ctx, user.ID, user.Email)
 	if err != nil {
+		metrics.LoginAttempt("error")
 		h.log.Error("login: issue refresh token: " + err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+
+	metrics.LoginAttempt("success")
 
 	c.JSON(http.StatusOK, AuthResponse{
 		AccessToken:  accessToken,
@@ -211,6 +220,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		case errors.Is(err, auth.ErrRefreshTokenReused):
 			// Признак кражи: клиент так себя не ведёт. Цепочка уже отозвана,
 			// клиенту отвечаем так же, как на любой невалидный токен.
+			metrics.RefreshTokenReuse()
 			h.log.Error("refresh: refresh token reuse detected, token family revoked")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
 		case errors.Is(err, auth.ErrInvalidRefreshToken):

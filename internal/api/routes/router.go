@@ -10,6 +10,7 @@ import (
 	"vpn-service/internal/api/handlers"
 	"vpn-service/internal/api/middleware"
 	"vpn-service/internal/config"
+	"vpn-service/internal/metrics"
 	"vpn-service/internal/services/auth"
 	"vpn-service/internal/services/vpn"
 	"vpn-service/internal/storage/postgres"
@@ -42,6 +43,7 @@ func Setup(cfg *config.Config, db *postgres.DB, cache *redis.Client, log *logger
 	// Middleware
 	router.Use(gin.Recovery())
 	router.Use(middleware.Logger(log))
+	router.Use(metrics.Middleware())
 	router.Use(corsMiddleware(cfg.Security.CORS.AllowedOrigins))
 
 	// Токены и сессии живут в Redis: это позволяет отзывать доступ
@@ -126,6 +128,8 @@ func Setup(cfg *config.Config, db *postgres.DB, cache *redis.Client, log *logger
 	router.GET("/health", healthHandler.Liveness)
 	// Readiness: проверяет БД и Redis.
 	router.GET("/readyz", healthHandler.Readiness)
+	// Метрики: отдавать только во внутреннюю сеть (NetworkPolicy/ingress).
+	router.GET("/metrics", metrics.Handler())
 
 	return router
 }

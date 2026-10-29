@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"vpn-service/internal/metrics"
 	"vpn-service/internal/storage/models"
 	"vpn-service/pkg/secretbox"
 	"vpn-service/pkg/utils"
@@ -165,6 +166,7 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 		applyErr = m.ovpnManager.AddClient(ctx, device.ID)
 	}
 	if applyErr != nil {
+		metrics.DeviceCreated(protocol, "error")
 		// Компенсация: без неё в БД осталось бы устройство в статусе active,
 		// которому не соответствует ни один пир.
 		if cleanupErr := m.db.DeleteDevice(ctx, device.ID); cleanupErr != nil {
@@ -172,6 +174,8 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 		}
 		return nil, fmt.Errorf("failed to register %s peer: %w", protocol, applyErr)
 	}
+
+	metrics.DeviceCreated(protocol, "success")
 
 	return device, nil
 }
