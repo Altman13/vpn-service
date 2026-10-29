@@ -81,6 +81,13 @@ func (s *memStore) ListAllocatedIPs(_ context.Context) ([]string, error) {
 	return addresses, nil
 }
 
+func (s *memStore) SetDeviceCertSerial(_ context.Context, id, serial string) error {
+	if device, ok := s.devices[id]; ok {
+		device.CertSerial = serial
+	}
+	return nil
+}
+
 func newTestManager(store DeviceStore) *Manager {
 	return NewManager(store,
 		WireGuardConfig{

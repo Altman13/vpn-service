@@ -65,6 +65,10 @@ func Setup(cfg *config.Config, db *postgres.DB, cache *redis.Client, log *logger
 			ConfigPath:  cfg.VPN.OpenVPN.ConfigPath,
 			Port:        cfg.VPN.OpenVPN.Port,
 			NetworkCIDR: cfg.VPN.OpenVPN.NetworkCIDR,
+			Enabled:     cfg.VPN.OpenVPN.Enabled,
+			PKIDir:      cfg.VPN.OpenVPN.PKIDir,
+			Endpoint:    cfg.VPN.OpenVPN.Endpoint,
+			Proto:       cfg.VPN.OpenVPN.Proto,
 		},
 	)
 

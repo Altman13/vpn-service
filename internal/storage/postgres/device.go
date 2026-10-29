@@ -5,9 +5,9 @@ import (
 	"vpn-service/internal/storage/models"
 )
 
-// COALESCE нужен для строк, созданных до появления public_key: там NULL,
-// а скан в string NULL не переносит.
-const deviceColumns = `id, user_id, name, protocol, device_key, COALESCE(public_key, '') AS public_key, ip_address, status, created_at, updated_at, last_active`
+// COALESCE нужен для строк, созданных до появления public_key и cert_serial:
+// там NULL, а скан в string NULL не переносит.
+const deviceColumns = `id, user_id, name, protocol, device_key, COALESCE(public_key, '') AS public_key, COALESCE(cert_serial, '') AS cert_serial, ip_address, status, created_at, updated_at, last_active`
 
 func (db *DB) CreateDevice(ctx context.Context, device *models.Device) error {
 	query := `
@@ -67,6 +67,13 @@ func (db *DB) ListAllocatedIPs(ctx context.Context) ([]string, error) {
 func (db *DB) UpdateDeviceStatus(ctx context.Context, id, status string) error {
 	query := `UPDATE devices SET status = $1, updated_at = NOW() WHERE id = $2`
 	_, err := db.ExecContext(ctx, query, status, id)
+	return err
+}
+
+// SetDeviceCertSerial сохраняет серийный номер сертификата OpenVPN.
+func (db *DB) SetDeviceCertSerial(ctx context.Context, id, serial string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE devices SET cert_serial = $1, updated_at = NOW() WHERE id = $2`, serial, id)
 	return err
 }
 

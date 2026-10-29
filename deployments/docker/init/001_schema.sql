@@ -44,6 +44,10 @@ CREATE INDEX IF NOT EXISTS idx_devices_user_id ON devices(user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
 CREATE INDEX IF NOT EXISTS idx_devices_protocol ON devices(protocol);
 
+-- Серийный номер клиентского сертификата OpenVPN: нужен для отзыва через CRL.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS cert_serial VARCHAR(64);
+CREATE INDEX IF NOT EXISTS idx_devices_cert_serial ON devices(cert_serial);
+
 -- Сессии
 CREATE TABLE IF NOT EXISTS sessions (
     id UUID PRIMARY KEY,

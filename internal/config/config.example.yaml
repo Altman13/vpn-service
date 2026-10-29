@@ -51,3 +51,9 @@ vpn:
     config_path: "/etc/openvpn/server.conf"
     port: 1194
     network_cidr: "10.8.0.0/24"
+    # true — сервис выпускает клиентские сертификаты встроенным CA.
+    enabled: false
+    # Каталог CA: ca.crt, ca.key (0600), crl.pem, revoked.json.
+    pki_dir: "/var/lib/vpn-service/pki"
+    endpoint: "vpn.example.com"
+    proto: "udp"

@@ -85,6 +85,13 @@ type OpenVPNConfig struct {
 	ConfigPath  string `mapstructure:"config_path"`
 	Port        int    `mapstructure:"port"`
 	NetworkCIDR string `mapstructure:"network_cidr"`
+	// Enabled включает выдачу клиентских сертификатов встроенным CA.
+	// false — протокол отвечает 503 «не настроен».
+	Enabled bool `mapstructure:"enabled"`
+	// PKIDir — каталог с ca.crt, ca.key, crl.pem и списком отозванных.
+	PKIDir   string `mapstructure:"pki_dir"`
+	Endpoint string `mapstructure:"endpoint"`
+	Proto    string `mapstructure:"proto"`
 }
 
 func Load() (*Config, error) {

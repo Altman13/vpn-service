@@ -102,6 +102,15 @@ func (s *fakeDeviceStore) ListAllocatedIPs(_ context.Context) ([]string, error) 
 	return addresses, nil
 }
 
+func (s *fakeDeviceStore) SetDeviceCertSerial(_ context.Context, id, serial string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if device, ok := s.devices[id]; ok {
+		device.CertSerial = serial
+	}
+	return nil
+}
+
 func tokenFor(t *testing.T, userID string) string {
 	t.Helper()
 	claims := middleware.Claims{

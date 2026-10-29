@@ -21,6 +21,8 @@ type Device struct {
 	Protocol   string    `json:"protocol" db:"protocol"` // wireguard, openvpn
 	DeviceKey  string    `json:"-" db:"device_key"`
 	PublicKey  string    `json:"public_key,omitempty" db:"public_key"`
+	// CertSerial — серийный номер клиентского сертификата OpenVPN.
+	CertSerial string    `json:"cert_serial,omitempty" db:"cert_serial"`
 	IPAddress  string    `json:"ip_address" db:"ip_address"`
 	Status     string    `json:"status" db:"status"` // active, revoked, expired
 	LastActive time.Time `json:"last_active" db:"last_active"`

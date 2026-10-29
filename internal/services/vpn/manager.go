@@ -53,6 +53,12 @@ type OpenVPNConfig struct {
 	ConfigPath  string
 	Port        int
 	NetworkCIDR string
+	// Enabled включает выдачу клиентских сертификатов через встроенный CA.
+	Enabled bool
+	// PKIDir — каталог с CA, CRL и списком отозванных сертификатов.
+	PKIDir   string
+	Endpoint string
+	Proto    string
 }
 
 // DeviceStore — часть хранилища устройств, которая нужна менеджеру.
@@ -65,6 +71,9 @@ type DeviceStore interface {
 	DeleteDevice(ctx context.Context, id string) error
 	// ListAllocatedIPs возвращает адреса, занятые неотозванными устройствами.
 	ListAllocatedIPs(ctx context.Context) ([]string, error)
+	// SetDeviceCertSerial сохраняет серийный номер сертификата OpenVPN,
+	// чтобы устройство можно было отозвать.
+	SetDeviceCertSerial(ctx context.Context, id, serial string) error
 }
 
 type Manager struct {
@@ -117,7 +126,7 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 	case ProtocolWireGuard:
 		applyErr = m.wgManager.AddPeer(ctx, device.PublicKey, device.IPAddress)
 	case ProtocolOpenVPN:
-		applyErr = m.ovpnManager.AddClient(ctx, device.ID, device.DeviceKey)
+		applyErr = m.ovpnManager.AddClient(ctx, device.ID)
 	}
 	if applyErr != nil {
 		// Компенсация: без неё в БД осталось бы устройство в статусе active,
@@ -188,7 +197,24 @@ func (m *Manager) GetDeviceConfig(ctx context.Context, userID, deviceID string) 
 			Address:    device.IPAddress,
 		})
 	case ProtocolOpenVPN:
-		return m.ovpnManager.GetConfig(device.ID, device.DeviceKey)
+		// Один активный сертификат на устройство: предыдущий отзывается,
+		// иначе у пользователя оставался бы рабочий дубликат.
+		if device.CertSerial != "" {
+			if err := m.ovpnManager.Revoke(device.CertSerial); err != nil {
+				return "", err
+			}
+		}
+
+		config, serial, err := m.ovpnManager.IssueConfig(ctx, device.ID)
+		if err != nil {
+			return "", err
+		}
+		if serial != "" {
+			if err := m.db.SetDeviceCertSerial(ctx, device.ID, serial); err != nil {
+				return "", fmt.Errorf("save certificate serial: %w", err)
+			}
+		}
+		return config, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedProtocol, device.Protocol)
 	}
@@ -214,8 +240,10 @@ func (m *Manager) RevokeDevice(ctx context.Context, userID, deviceID string) err
 			return err
 		}
 	case ProtocolOpenVPN:
-		if err := m.ovpnManager.RemoveClient(ctx, device.ID); err != nil {
-			return err
+		if device.CertSerial != "" {
+			if err := m.ovpnManager.Revoke(device.CertSerial); err != nil {
+				return err
+			}
 		}
 	}
 
