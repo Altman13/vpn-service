@@ -12,6 +12,13 @@ build:
 test:
 	go test -v ./...
 
+# Интеграционные тесты: нужна живая PostgreSQL с применёнными миграциями.
+# Пример: docker run -d --name vpn-pg -e POSTGRES_PASSWORD=postgres \
+#           -e POSTGRES_DB=vpn_service -p 15432:5432 postgres:15-alpine
+# TEST_DATABASE_DSN='postgres://postgres:postgres@127.0.0.1:15432/vpn_service?sslmode=disable'
+integration-test:
+	go test -tags integration -run Integration -v ./...
+
 # Docker
 docker-up:
 	docker-compose -f deployments/docker/docker-compose.yml up -d
