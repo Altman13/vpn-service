@@ -72,6 +72,8 @@ type DeviceStore interface {
 	// SetDeviceCertSerial сохраняет серийный номер сертификата OpenVPN,
 	// чтобы устройство можно было отозвать.
 	SetDeviceCertSerial(ctx context.Context, id, serial string) error
+	// SetDeviceKey сохраняет перешифрованный приватный ключ устройства.
+	SetDeviceKey(ctx context.Context, id, key string) error
 }
 
 type Manager struct {
@@ -114,6 +116,25 @@ func (m *Manager) openKey(key string) (string, error) {
 		return key, nil
 	}
 	return m.box.Open(key)
+}
+
+// reencryptLegacyKey перешифровывает ключ, созданный до включения шифрования:
+// иначе такие записи остались бы открытыми навсегда. Ошибка не влияет на
+// выдачу конфига — это фоновое улучшение, и следующий запрос попробует снова.
+func (m *Manager) reencryptLegacyKey(ctx context.Context, device *models.Device) {
+	if m.box == nil || secretbox.IsSealed(device.DeviceKey) {
+		return
+	}
+
+	sealed, err := m.box.Seal(device.DeviceKey)
+	if err != nil {
+		return
+	}
+	if err := m.db.SetDeviceKey(ctx, device.ID, sealed); err != nil {
+		return
+	}
+
+	device.DeviceKey = sealed
 }
 
 func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol string) (*models.Device, error) {
@@ -210,6 +231,7 @@ func (m *Manager) GetDeviceConfig(ctx context.Context, userID, deviceID string) 
 		if err != nil {
 			return "", fmt.Errorf("decrypt device key: %w", err)
 		}
+		m.reencryptLegacyKey(ctx, device)
 		return m.wgManager.GetConfig(ClientConfig{
 			PrivateKey: privateKey,
 			Address:    device.IPAddress,

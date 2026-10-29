@@ -104,6 +104,15 @@ func (s *fakeDeviceStore) DeleteDevice(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *fakeDeviceStore) SetDeviceKey(_ context.Context, id, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if device, ok := s.devices[id]; ok {
+		device.DeviceKey = key
+	}
+	return nil
+}
+
 func (s *fakeDeviceStore) SetDeviceCertSerial(_ context.Context, id, serial string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

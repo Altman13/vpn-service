@@ -76,6 +76,13 @@ func (s *memStore) DeleteDevice(_ context.Context, id string) error {
 	return nil
 }
 
+func (s *memStore) SetDeviceKey(_ context.Context, id, key string) error {
+	if device, ok := s.devices[id]; ok {
+		device.DeviceKey = key
+	}
+	return nil
+}
+
 func (s *memStore) SetDeviceCertSerial(_ context.Context, id, serial string) error {
 	if device, ok := s.devices[id]; ok {
 		device.CertSerial = serial

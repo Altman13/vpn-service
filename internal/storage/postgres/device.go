@@ -117,6 +117,13 @@ func (db *DB) SetDeviceCertSerial(ctx context.Context, id, serial string) error 
 	return err
 }
 
+// SetDeviceKey сохраняет перешифрованный приватный ключ устройства.
+func (db *DB) SetDeviceKey(ctx context.Context, id, key string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE devices SET device_key = $1, updated_at = NOW() WHERE id = $2`, key, id)
+	return err
+}
+
 // DeleteDevice используется для компенсации, когда запись в БД уже создана,
 // а настройка пира/клиента завершилась ошибкой.
 func (db *DB) DeleteDevice(ctx context.Context, id string) error {
