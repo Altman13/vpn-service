@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vpn-service/internal/storage/models"
+	"vpn-service/pkg/secretbox"
 	"vpn-service/pkg/utils"
 )
 
@@ -81,6 +82,9 @@ type Manager struct {
 	wgManager   *WireGuardManager
 	ovpnManager *OpenVPNManager
 	wgConfig    WireGuardConfig
+	// box шифрует приватные ключи устройств перед записью в БД.
+	// nil — шифрование не настроено, ключи хранятся как есть.
+	box *secretbox.Box
 }
 
 func NewManager(db DeviceStore, wgConfig WireGuardConfig, ovpnConfig OpenVPNConfig) *Manager {
@@ -92,6 +96,29 @@ func NewManager(db DeviceStore, wgConfig WireGuardConfig, ovpnConfig OpenVPNConf
 	}
 }
 
+// UseSecretBox включает шифрование приватных ключей устройств.
+// Вызывается один раз при сборке сервиса, до обработки запросов.
+func (m *Manager) UseSecretBox(box *secretbox.Box) {
+	m.box = box
+}
+
+// sealKey шифрует приватный ключ для хранения; nil-шифр — ключ остаётся как есть.
+func (m *Manager) sealKey(key string) (string, error) {
+	if m.box == nil || key == "" {
+		return key, nil
+	}
+	return m.box.Seal(key)
+}
+
+// openKey расшифровывает ключ из БД. Значения без метки шифрования
+// возвращаются как есть — это записи, созданные до включения шифрования.
+func (m *Manager) openKey(key string) (string, error) {
+	if m.box == nil || key == "" {
+		return key, nil
+	}
+	return m.box.Open(key)
+}
+
 func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol string) (*models.Device, error) {
 	// Протокол проверяется до записи в БД, чтобы не оставлять мусорные строки.
 	if protocol != ProtocolWireGuard && protocol != ProtocolOpenVPN {
@@ -101,6 +128,11 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 	privateKey, publicKey, err := deviceKeys(protocol)
 	if err != nil {
 		return nil, err
+	}
+
+	storedKey, err := m.sealKey(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt device key: %w", err)
 	}
 
 	// Интерфейс проверяется до записи в БД: если поднять его не удалось,
@@ -117,7 +149,7 @@ func (m *Manager) CreateDevice(ctx context.Context, userID, deviceName, protocol
 		UserID:     userID,
 		Name:       deviceName,
 		Protocol:   protocol,
-		DeviceKey:  privateKey,
+		DeviceKey:  storedKey,
 		PublicKey:  publicKey,
 		Status:     "active",
 		CreatedAt:  now,
@@ -200,8 +232,12 @@ func (m *Manager) GetDeviceConfig(ctx context.Context, userID, deviceID string) 
 
 	switch device.Protocol {
 	case ProtocolWireGuard:
+		privateKey, err := m.openKey(device.DeviceKey)
+		if err != nil {
+			return "", fmt.Errorf("decrypt device key: %w", err)
+		}
 		return m.wgManager.GetConfig(ClientConfig{
-			PrivateKey: device.DeviceKey,
+			PrivateKey: privateKey,
 			Address:    device.IPAddress,
 		})
 	case ProtocolOpenVPN:

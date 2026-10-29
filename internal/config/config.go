@@ -1,9 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
+
+	"vpn-service/pkg/secretbox"
 )
 
 type Config struct {
@@ -44,6 +47,11 @@ type JWTConfig struct {
 type SecurityConfig struct {
 	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
 	CORS      CORSConfig      `mapstructure:"cors"`
+	// EncryptionKey — ключ AES-256 в base64 для шифрования приватных ключей
+	// устройств в БД. Пустое значение означает хранение без шифрования.
+	EncryptionKey string `mapstructure:"encryption_key"`
+	// Box собирается из EncryptionKey при загрузке конфига.
+	Box *secretbox.Box `mapstructure:"-"`
 }
 
 type RateLimitConfig struct {
@@ -107,6 +115,7 @@ func Load() (*Config, error) {
 	_ = viper.BindEnv("jwt.secret", "JWT_SECRET")
 	_ = viper.BindEnv("database.host", "DATABASE_HOST")
 	_ = viper.BindEnv("redis.host", "REDIS_HOST")
+	_ = viper.BindEnv("security.encryption_key", "ENCRYPTION_KEY")
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err
@@ -115,6 +124,16 @@ func Load() (*Config, error) {
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, err
+	}
+
+	// Неверный ключ — ошибка запуска, а не тихий переход на хранение
+	// ключей устройств открытым текстом.
+	if config.Security.EncryptionKey != "" {
+		box, err := secretbox.FromBase64(config.Security.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("security.encryption_key: %w", err)
+		}
+		config.Security.Box = box
 	}
 
 	return &config, nil

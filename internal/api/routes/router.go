@@ -72,6 +72,10 @@ func Setup(cfg *config.Config, db *postgres.DB, cache *redis.Client, log *logger
 		},
 	)
 
+	if cfg.Security.Box != nil {
+		vpnManager.UseSecretBox(cfg.Security.Box)
+	}
+
 	// Инициализация хендлеров
 	vpnHandler := handlers.NewVPNHandler(log, vpnManager)
 	authHandler := handlers.NewAuthHandler(tokenService, db, log)

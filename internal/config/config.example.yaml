@@ -23,6 +23,10 @@ jwt:
   refresh_expire_time: 720
 
 security:
+  # Ключ AES-256 в base64 для шифрования приватных ключей устройств в БД.
+  # Сгенерировать: openssl rand -base64 32
+  # Пусто — ключи хранятся открытым текстом (только для разработки).
+  encryption_key: ""
   rate_limit:
     enabled: true
     # Не более 10 запросов на /auth/* с одного IP за минуту.
